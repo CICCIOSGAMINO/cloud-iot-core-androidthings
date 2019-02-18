@@ -1,6 +1,7 @@
 package com.ciccio.iotcoreclient
 
 import com.google.android.things.bluetooth.ConnectionParams
+import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -53,7 +54,16 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private val TAG = IotCoreClient::class.java.simpleName
 
-class IotCoreClient {
+class IotCoreClient(
+    private val mConnectionParams : ConnectionParams,   // Info to connect to Cloud IoT Core
+    private val mJwtGenerator : JwtGenerator,  // Generate signed JWT to authenticate on Cloud IoT Core
+    private val mMqttClient : MqttClient,
+    private val mSubscriptionTopics : List<String> = listOf<String>(),   // Subscription topics
+    private val mRunBackgroundThread : AtomicBoolean, // Control the execution of b thred, The thread stops if mRunBackgroundThread is false
+    private val mUnsentTelemetryEvent : TelemetryEvent,  // Store telemetry events failed to sent
+    private val mTelemetryQueue : Queue<TelemetryEvent>
+
+){
 
     // Settings for exponential backoff behavior. These values are from Cloud IoT Core's recommendations at
     // https://cloud.google.com/iot/docs/requirements#managing_excessive_load_with_exponential_backoff
@@ -67,27 +77,10 @@ class IotCoreClient {
     // Quality of service level ( 1 = at least one / 0 = at most one )
     private val QOS_FOR_DEVICE_STATE_MESSAGES = 1
 
-    // All necessary info to connect to Cloud IoT Core
-    private lateinit var mConnectionParams : ConnectionParams
+    init {
+        if(mTelemetryQueue)
 
-    // Generates signed JWTs to authenticate with Cloud IoT Core
-    private lateinit var mJwtGenerator : JwtGenerator
-
-    // Underlying MQTT client implementation.
-    private lateinit var mMqttClient : MqttClient
-
-    // Subscriptions Topics
-    private var mSubscriptionTopics = listOf<String>()
-
-    // Control the execution of background thred, The thread stops if mRunBackgroundThread is
-    // false
-    private lateinit var mRunBackgroundThread : AtomicBoolean
-
-    // Store telemetry events that failed to send so it can be resent when connection
-    // to IoT Core can be reestablished
-    private lateinit var mUnsentTelemetryEvent : TelemetryEvent
-
-
+    }
 
 
 }
