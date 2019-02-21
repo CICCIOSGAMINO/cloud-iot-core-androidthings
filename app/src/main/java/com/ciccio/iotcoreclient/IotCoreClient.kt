@@ -1,7 +1,10 @@
 package com.ciccio.iotcoreclient
 
+import android.media.browse.MediaBrowser
 import com.google.android.things.bluetooth.ConnectionParams
 import java.util.*
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -55,14 +58,19 @@ import java.util.concurrent.atomic.AtomicBoolean
 private val TAG = IotCoreClient::class.java.simpleName
 
 class IotCoreClient(
-    private val mConnectionParams : ConnectionParams,   // Info to connect to Cloud IoT Core
-    private val mJwtGenerator : JwtGenerator,  // Generate signed JWT to authenticate on Cloud IoT Core
-    private val mMqttClient : MqttClient,
-    private val mSubscriptionTopics : List<String> = listOf<String>(),   // Subscription topics
-    private val mRunBackgroundThread : AtomicBoolean, // Control the execution of b thred, The thread stops if mRunBackgroundThread is false
-    private val mUnsentTelemetryEvent : TelemetryEvent,  // Store telemetry events failed to sent
-    private val mTelemetryQueue : Queue<TelemetryEvent>
-
+    private val mConnectionParams: ConnectionParams,   // Info to connect to Cloud IoT Core
+    private val mJwtGenerator: JwtGenerator,  // Generate signed JWT to authenticate on Cloud IoT Core
+    private val mMqttClient: MqttClient,
+    private val mSubscriptionTopics: List<String> = listOf<String>(),   // Subscription topics
+    private val mRunBackgroundThread: AtomicBoolean, // Control the execution of b thred, The thread stops if mRunBackgroundThread is false
+    private val mUnsentTelemetryEvent: TelemetryEvent,  // Store telemetry events failed to sent
+    private var mTelemetryQueue: Queue<TelemetryEvent>?,
+    private val mConnectionCallback: ConnectionCallback,
+    private var mConnectionCallbackExecutor: Executor,
+    private val mOnCommandListener: OnCommandListener,
+    private var mOnCommandExecutor: Executor,
+    private val mOnConfigurationListener: OnConfigurationListener,
+    private var mOnConfigurationExecutor: Executor
 ){
 
     // Settings for exponential backoff behavior. These values are from Cloud IoT Core's recommendations at
@@ -77,9 +85,38 @@ class IotCoreClient(
     // Quality of service level ( 1 = at least one / 0 = at most one )
     private val QOS_FOR_DEVICE_STATE_MESSAGES = 1
 
-    init {
-        if(mTelemetryQueue)
+    private lateinit var mqttClient: MqttClient
 
+    init {
+
+        if(mTelemetryQueue == null) {
+            mTelemetryQueue = CapacityQueue<TelemetryEvent>(DEFAULT_QUEUE_CAPACITY, CapacityQueue.DROP_POLICY_HEAD)
+        }
+
+        if(mOnConfigurationListener != null && mOnConfigurationExecutor == null) {
+            mOnConfigurationExecutor = createDefaultExecutor()
+        }
+
+        if(mOnCommandListener != null && mOnCommandExecutor == null) {
+            mOnCommandExecutor = createDefaultExecutor()
+        }
+
+        if(mConnectionCallback != null && mConnectionCallbackExecutor == null) {
+            mConnectionCallbackExecutor = createDefaultExecutor()
+        }
+
+        try {
+            mqttClient = MqttClient(
+                mConnectionParams.brokerUrl
+            )
+        } catch (e: MqttException) {
+
+        }
+
+    }
+
+    private fun createDefaultExecutor() : Executor {
+        return Executors.newCachedThreadPool()
     }
 
 
