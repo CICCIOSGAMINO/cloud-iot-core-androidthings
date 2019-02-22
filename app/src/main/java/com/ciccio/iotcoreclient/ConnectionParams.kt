@@ -15,13 +15,13 @@ import java.time.Duration
  */
 
 class ConnectionParams(
-        private val mProjectId : String,    // GCP Cloud Project name
-        private val mRegistryId : String,   // Cloud IoT Registry name
-        private val mDeviceId : String,     // Cloud IoT Device Id
-        private val mCloudRegion : String,  // GCP Cloud Region
-        private val mBridgeHostname : String,   // MQTT Bridge hostname
-        private val mBridgePort : Int,      // MQTT Bridge port
-        private val mAuthTokenLifetimeMills : Long  // Duration JWT Token
+        mProjectId : String,    // GCP Cloud Project name
+        mRegistryId : String,   // Cloud IoT Registry name
+        mDeviceId : String,     // Cloud IoT Device Id
+        mCloudRegion : String,  // GCP Cloud Region
+        mBridgeHostname : String,   // MQTT Bridge hostname
+        mBridgePort : Int,      // MQTT Bridge port
+        mAuthTokenLifetimeMills : Long  // Duration JWT Token
 
 ) {
 
@@ -40,10 +40,10 @@ class ConnectionParams(
 
     companion object {
 
-        private val DEFAULT_BRIDGE_HOSTNAME = "mqtt.googleapis.com"
-        private val DEFAULT_BRIDGE_PORT = 8883
-        private val MAX_TCP_PORT = 65535
-        private val DEFAULT_AUTH_TOKEN_LIFETIME_MILLIS = Duration.ofHours(1).toMillis()
+        val DEFAULT_BRIDGE_HOSTNAME = "mqtt.googleapis.com"
+        val DEFAULT_BRIDGE_PORT = 8883
+        val MAX_TCP_PORT = 65535
+        val DEFAULT_AUTH_TOKEN_LIFETIME_MILLIS = Duration.ofHours(1).toMillis()
 
     }
 
@@ -68,6 +68,15 @@ class ConnectionParams(
         mDeviceStateTopic = "/devices/$mDeviceId/state"
         mConfigurationTopic = "/devices/$mDeviceId/config"
         mCommandsTopic = "/devices/$mDeviceId/commands"
+    }
+
+
+    fun getBrokerUrl(): String {
+        return mBrokerUrl
+    }
+
+    fun getClientId(): String {
+        return mClientId
     }
 
 

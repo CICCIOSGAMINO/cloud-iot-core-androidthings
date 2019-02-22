@@ -29,4 +29,12 @@ dependencies {
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.1.0-alpha4'
     compileOnly 'com.google.android.things:androidthings:+'
     implementation"org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
+
+    // MQTT
+    implementation('org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.0') {
+        exclude group: 'com.google.android', module: 'support-v4'
+    }
+    implementation('org.eclipse.paho:org.eclipse.paho.android.service:1.1.1') {
+        exclude group: 'com.google.android', module: 'support-v4'
+    }
 }

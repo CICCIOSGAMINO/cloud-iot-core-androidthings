@@ -1,7 +1,8 @@
 package com.ciccio.iotcoreclient
 
-import android.media.browse.MediaBrowser
 import com.google.android.things.bluetooth.ConnectionParams
+import org.eclipse.paho.client.mqttv3.MqttClient
+import org.eclipse.paho.client.mqttv3.MqttException
 import java.util.*
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
@@ -58,7 +59,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 private val TAG = IotCoreClient::class.java.simpleName
 
 class IotCoreClient(
-    private val mConnectionParams: ConnectionParams,   // Info to connect to Cloud IoT Core
+    mConnectionParams: ConnectionParams,   // Info to connect to Cloud IoT Core
     private val mJwtGenerator: JwtGenerator,  // Generate signed JWT to authenticate on Cloud IoT Core
     private val mMqttClient: MqttClient,
     private val mSubscriptionTopics: List<String> = listOf<String>(),   // Subscription topics
@@ -107,13 +108,15 @@ class IotCoreClient(
 
         try {
             mqttClient = MqttClient(
-                mConnectionParams.brokerUrl
+                mConnectionParams = ConnectionParams()
+
             )
         } catch (e: MqttException) {
 
         }
 
     }
+
 
     private fun createDefaultExecutor() : Executor {
         return Executors.newCachedThreadPool()
