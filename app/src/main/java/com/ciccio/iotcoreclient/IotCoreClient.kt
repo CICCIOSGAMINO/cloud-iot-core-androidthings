@@ -1,11 +1,11 @@
 package com.ciccio.iotcoreclient
 
-import com.google.android.things.bluetooth.ConnectionParams
-import org.eclipse.paho.client.mqttv3.MqttClient
-import org.eclipse.paho.client.mqttv3.MqttException
+import org.eclipse.paho.client.mqttv3.*
+import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import java.util.*
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -62,8 +62,8 @@ class IotCoreClient(
     mConnectionParams: ConnectionParams,   // Info to connect to Cloud IoT Core
     private val mJwtGenerator: JwtGenerator,  // Generate signed JWT to authenticate on Cloud IoT Core
     private val mMqttClient: MqttClient,
-    private val mSubscriptionTopics: List<String> = listOf<String>(),   // Subscription topics
     private val mRunBackgroundThread: AtomicBoolean, // Control the execution of b thred, The thread stops if mRunBackgroundThread is false
+    private val mSubscriptionTopics: List<String> = listOf<String>(),   // Subscription topics
     private val mUnsentTelemetryEvent: TelemetryEvent,  // Store telemetry events failed to sent
     private var mTelemetryQueue: Queue<TelemetryEvent>?,
     private val mConnectionCallback: ConnectionCallback,
@@ -87,6 +87,7 @@ class IotCoreClient(
     private val QOS_FOR_DEVICE_STATE_MESSAGES = 1
 
     private lateinit var mqttClient: MqttClient
+    private val mSemaphore = Semaphore(0)
 
     init {
 
@@ -106,21 +107,84 @@ class IotCoreClient(
             mConnectionCallbackExecutor = createDefaultExecutor()
         }
 
+        // Init the Mqtt
         try {
             mqttClient = MqttClient(
-                mConnectionParams = ConnectionParams()
-
+                mConnectionParams.getBrokerUrl(),
+                mConnectionParams.getClientId(),
+                MemoryPersistence()
             )
         } catch (e: MqttException) {
+            // According to the Paho documentation, this exception happens when the arguments to
+            // the method are valid, but "other problems" occur. Since that isn't particularly
+            // helpful, rethrow as an IllegalStateException so public API doesn't depend on Paho
+            // library.
+            //
+            // Paho docs for this method are available at
+            // http://www.eclipse.org/paho/files/javadoc/org/eclipse/paho/client/mqttv3/MqttClient.html#MqttClient-java.lang.String-java.lang.String-org.eclipse.paho.client.mqttv3.MqttClientPersistence-
+            //
+            // Based on the Paho source (https://github.com/eclipse/paho.mqtt.java), it looks
+            // like this exception should never happen. The MqttClient constructor throws an
+            // MqttException if
+            //   1. MemoryPersistence.open throws an exception. This cannot happen.
+            //      MemoryPersistence.open says it throws an MqttPersistenceException because it
+            //      implements an interface that requires that definition.
+            //   2. If there's an exception when sending unsent messages stored in the
+            //      MemoryPersistence object. This should never happen because we make a new
+            //      MemoryPersistence instance every time we call the MqttClient constructor.
+            throw IllegalStateException(e)
 
         }
 
+        // With Kotlin Object declaration, define the Mqtt Callbacks
+        mMqttClient.setCallback(object: MqttCallback {
+
+            override fun connectionLost(cause: Throwable?) {
+                // Release the semaphore blocking the background thread so it reconnects to IoT Core
+                mSemaphore.release()
+                var reason: Int = ConnectionCallback.REASON_UNKNOWN
+
+                if(cause is MqttException) {
+                    reason = getDisconnectionReason(cause)
+                }
+            }
+
+            override fun deliveryComplete(token: IMqttDeliveryToken?) {
+                TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+            }
+
+            override fun messageArrived(topic: String?, message: MqttMessage?) {
+                TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+            }
+
+
+            fun getDisconnectionReason(mqEx: MqttException): Int {
+                when(mqEx.reasonCode){
+                    MqttException.REASON_CODE_FAILED_AUTHENTICATION -> 
+                }
+            }
+
+        })
+
     }
 
-
+    /**
+     * New Chached Thread Pool
+     */
     private fun createDefaultExecutor() : Executor {
         return Executors.newCachedThreadPool()
     }
+
+    /**
+     * Set the Mqtt Callbacks
+     */
+    private fun createMqttCallback(
+        onConfigurationExecutor: Executor
+    ) {
+
+    }
+
+
 
 
 }

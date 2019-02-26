@@ -38,6 +38,7 @@ class ConnectionParams(
     // Cached Broker URL
     private val mBrokerUrl : String
 
+
     companion object {
 
         val DEFAULT_BRIDGE_HOSTNAME = "mqtt.googleapis.com"
@@ -71,10 +72,16 @@ class ConnectionParams(
     }
 
 
+    /**
+     * Get the URL of Broker
+     */
     fun getBrokerUrl(): String {
         return mBrokerUrl
     }
 
+    /**
+     * Get complete Google Cloud Client Id
+     */
     fun getClientId(): String {
         return mClientId
     }
