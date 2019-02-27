@@ -2,11 +2,15 @@ package com.ciccio.iotcoreclient
 
 import org.eclipse.paho.client.mqttv3.*
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
+import java.io.EOFException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.*
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.net.ssl.SSLException
 
 /**
  * IotCoreClient manages interactions with Google Cloud IoT Core for a single device.
@@ -110,8 +114,8 @@ class IotCoreClient(
         // Init the Mqtt
         try {
             mqttClient = MqttClient(
-                mConnectionParams.getBrokerUrl(),
-                mConnectionParams.getClientId(),
+                mConnectionParams.brokerUrl,
+                mConnectionParams.clientId,
                 MemoryPersistence()
             )
         } catch (e: MqttException) {
@@ -147,21 +151,86 @@ class IotCoreClient(
                 if(cause is MqttException) {
                     reason = getDisconnectionReason(cause)
                 }
+                onDisconnect(reason)
+            }
+
+            override fun messageArrived(topic: String?, message: MqttMessage?) {
+                if(mConnectionParams.configurationTopic.equals(topic, true) &&
+                        mOnConfigurationListener != null &&
+                        mOnConfigurationExecutor != null) {
+                    // Call the client's onConfigurationListner
+                    val payload: ByteArray = message.payload
+                    mOnConfigurationExecutor.execute {
+                        mOnConfigurationListener.onConfigurationReceived(payload)
+                    }
+
+                }
             }
 
             override fun deliveryComplete(token: IMqttDeliveryToken?) {
                 TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
             }
 
-            override fun messageArrived(topic: String?, message: MqttMessage?) {
-                TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
-            }
-
-
             fun getDisconnectionReason(mqEx: MqttException): Int {
-                when(mqEx.reasonCode){
-                    MqttException.REASON_CODE_FAILED_AUTHENTICATION -> 
+
+                return when(mqEx.reasonCode){
+                    MqttException.REASON_CODE_FAILED_AUTHENTICATION.toInt(),
+                        MqttException.REASON_CODE_NOT_AUTHORIZED.toInt()
+                        // These cases happen if client use an invalid :
+                        // + IoT Core Registry ID
+                        // + IoT Core Device ID
+                        // + Cloud GCP Region
+                        // + Unregistred Signed Key
+                            -> ConnectionCallback.REASON_NOT_AUTHORIZED
+
+                    MqttException.REASON_CODE_CONNECTION_LOST.toInt() -> {
+                        if (mqEx.cause is EOFException) {
+                            // This happens when Paho or Cloud IoT Core close the connection
+                            if (mRunBackgroundThread.get()) {
+                                // If mRunBackground is true, then Cloud Core IoT closed the connection
+                                // Example this cloud happen if the client use an invalid GCP Project
+                                // ID, the client exceeds a rate limit set by Cloud IoT Core or if
+                                // the MQTT Broker address is invalid
+                                return ConnectionCallback.REASON_CONNECTION_LOST
+                            } else {
+                                // If mRunBackground is false, then the client closed the connection
+                                return ConnectionCallback.REASON_CLIENT_CLOSED
+                            }
+                        }
+
+                        if (mqEx.cause is SSLException) {
+                            // This case happens when something goes wrong in the network that
+                            // ends an existing connection to Cloud IoT Core (e.g wifi driver resets)
+                            return ConnectionCallback.REASON_CONNECTION_LOST
+                        }
+                        return ConnectionCallback.REASON_UNKNOWN
+                    }
+
+                    MqttException.REASON_CODE_CLIENT_EXCEPTION.toInt() -> {
+                        // Paho use this reason code for several distinct error cases
+                        if(mqEx.cause is SocketTimeoutException) {
+                            // This case could happen if MQTT bridge port number is wrong or
+                            // there is some other error with the MQTT Bridge that keeps it from responding
+                            return ConnectionCallback.REASON_CONNECTION_TIMEOUT
+                        }
+
+                        if(mqEx.cause is UnknownHostException) {
+                            // This can happens if the client is disconnected from the Internet or if they
+                            // use an invalid hostname for the MQTT bridge. Paho doesn't provide a way
+                            // to get more information
+                            return ConnectionCallback.REASON_CONNECTION_LOST
+                        }
+                        return ConnectionCallback.REASON_UNKNOWN
+                    }
+
+                    MqttException.REASON_CODE_CLIENT_TIMEOUT.toInt(),
+                        MqttException.REASON_CODE_WRITE_TIMEOUT.toInt() ->
+                            return ConnectionCallback.REASON_CONNECTION_TIMEOUT
+
+                    else -> ConnectionCallback.REASON_UNKNOWN
+
                 }
+
             }
 
         })

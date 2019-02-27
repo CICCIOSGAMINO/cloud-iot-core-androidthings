@@ -4,9 +4,9 @@ abstract class ConnectionCallback {
 
     companion object {
         /** Could not determine the source of the error.  */
-        const val REASON_UNKNOWN: Short = 0
+        const val REASON_UNKNOWN = 0
         /** The parameters used to connect to Cloud IoT Core were invalid.  */
-        const val REASON_NOT_AUTHORIZED: Short = 1
+        const val REASON_NOT_AUTHORIZED = 1
 
         /** The device lost connection to Cloud IoT Core.  */
         val REASON_CONNECTION_LOST = 2

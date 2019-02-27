@@ -26,17 +26,17 @@ class ConnectionParams(
 ) {
 
     // Cached Cloud IoT Core client Id
-    private val mClientId : String
+    val clientId : String
     // Cached Cloud IoT Core Telemetry topic
-    private val mTelemetryTopic : String
+    val telemetryTopic : String
     // Cached Cloud IoT Core Device State Topic
-    private val mDeviceStateTopic : String
+    val deviceStateTopic : String
     // Cached Cloud IoT Core Device Config Topic
-    private val mConfigurationTopic : String
+    val configurationTopic : String
     // Cached Cloud IoT Core Device Commands Topic
-    private val mCommandsTopic : String
+    val commandsTopic : String
     // Cached Broker URL
-    private val mBrokerUrl : String
+    val brokerUrl : String
 
 
     companion object {
@@ -63,28 +63,12 @@ class ConnectionParams(
             throw IllegalArgumentException("JWT Auth Token Lifetime cannot exceed 24 hours")
         }
 
-        mBrokerUrl = "ssl://$mBridgeHostname:$mBridgePort"
-        mClientId = "projects/$mProjectId/locations/$mCloudRegion/registries/$mRegistryId/devices/$mDeviceId"
-        mTelemetryTopic = "/devices/$mDeviceId/events"
-        mDeviceStateTopic = "/devices/$mDeviceId/state"
-        mConfigurationTopic = "/devices/$mDeviceId/config"
-        mCommandsTopic = "/devices/$mDeviceId/commands"
+        brokerUrl = "ssl://$mBridgeHostname:$mBridgePort"
+        clientId = "projects/$mProjectId/locations/$mCloudRegion/registries/$mRegistryId/devices/$mDeviceId"
+        telemetryTopic = "/devices/$mDeviceId/events"
+        deviceStateTopic = "/devices/$mDeviceId/state"
+        configurationTopic = "/devices/$mDeviceId/config"
+        commandsTopic = "/devices/$mDeviceId/commands"
     }
-
-
-    /**
-     * Get the URL of Broker
-     */
-    fun getBrokerUrl(): String {
-        return mBrokerUrl
-    }
-
-    /**
-     * Get complete Google Cloud Client Id
-     */
-    fun getClientId(): String {
-        return mClientId
-    }
-
 
 }
