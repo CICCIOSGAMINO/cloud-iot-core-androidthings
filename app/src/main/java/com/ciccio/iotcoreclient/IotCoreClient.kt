@@ -1,5 +1,7 @@
 package com.ciccio.iotcoreclient
 
+import android.os.Process
+import android.util.Log
 import org.eclipse.paho.client.mqttv3.*
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import java.io.EOFException
@@ -11,6 +13,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.SSLException
+import org.eclipse.paho.client.mqttv3.MqttException
+
+
 
 /**
  * IotCoreClient manages interactions with Google Cloud IoT Core for a single device.
@@ -66,7 +71,8 @@ class IotCoreClient(
     mConnectionParams: ConnectionParams,   // Info to connect to Cloud IoT Core
     private val mJwtGenerator: JwtGenerator,  // Generate signed JWT to authenticate on Cloud IoT Core
     private val mMqttClient: MqttClient,
-    private val mRunBackgroundThread: AtomicBoolean, // Control the execution of b thred, The thread stops if mRunBackgroundThread is false
+    private val mClientConnectionState: AtomicBoolean, // The connection status from Client prospective
+    private var mRunBackgroundThread: AtomicBoolean, // Control the execution of background thred, The thread stops if mRunBackgroundThread is false
     private val mSubscriptionTopics: List<String> = listOf<String>(),   // Subscription topics
     private val mUnsentTelemetryEvent: TelemetryEvent,  // Store telemetry events failed to sent
     private var mTelemetryQueue: Queue<TelemetryEvent>?,
@@ -91,7 +97,11 @@ class IotCoreClient(
     private val QOS_FOR_DEVICE_STATE_MESSAGES = 1
 
     private lateinit var mqttClient: MqttClient
+    // Semaphore for thread
     private val mSemaphore = Semaphore(0)
+    private val mCommandsTopicPrefixRegex = String.format(Locale.US, "^%s/?", mConnectionParams.commandsTopic)
+    // Background Thread
+    private var mBackgroundThread: Thread? = null
 
     init {
 
@@ -155,20 +165,31 @@ class IotCoreClient(
             }
 
             override fun messageArrived(topic: String?, message: MqttMessage?) {
-                if(mConnectionParams.configurationTopic.equals(topic, true) &&
+
+                if (message?.payload != null && topic != null) {
+
+                    if(mConnectionParams.configurationTopic.equals(topic, true) &&
                         mOnConfigurationListener != null &&
                         mOnConfigurationExecutor != null) {
-                    // Call the client's onConfigurationListner
-                    val payload: ByteArray = message.payload
-                    mOnConfigurationExecutor.execute {
-                        mOnConfigurationListener.onConfigurationReceived(payload)
+                        // Call the client's onConfigurationListner
+                        mOnConfigurationExecutor.execute { mOnConfigurationListener.onConfigurationReceived(message.payload) }
+
+                    } else if(topic.startsWith(mConnectionParams.commandsTopic) &&
+                        mOnCommandListener != null &&
+                        mOnCommandExecutor != null) {
+                        // Call the client's OnCommandListener
+                        val subFolder = topic.replaceFirst(mCommandsTopicPrefixRegex, "")
+                        mOnCommandExecutor.execute {
+                            mOnCommandListener.onCommandReceived(subFolder, message.payload)
+                        }
+
                     }
 
-                }
+                } // End Null Check
+
             }
 
             override fun deliveryComplete(token: IMqttDeliveryToken?) {
-                TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
             }
 
             fun getDisconnectionReason(mqEx: MqttException): Int {
@@ -235,7 +256,8 @@ class IotCoreClient(
 
         })
 
-    }
+    }  // End Init
+
 
     /**
      * New Chached Thread Pool
@@ -252,6 +274,106 @@ class IotCoreClient(
     ) {
 
     }
+
+    /**
+     * Connect to Cloud IoT Core and perform any other required set up.
+     *
+     * <p>If the client registered a {@link ConnectionCallback},
+     * {@link ConnectionCallback#onConnected()} will be called when the connection with
+     * Cloud IoT Core is established. If the IotCoreClient ever disconnects from Cloud
+     * IoT Core after this method is called, it will automatically reestablish the connection unless
+     * {@link IotCoreClient#disconnect()} is called.
+     *
+     * <p>This method is non-blocking.
+     */
+    fun connect() {
+        mRunBackgroundThread.set(true)
+        // !mBackgroundThread.isAlive TODO
+        if(mBackgroundThread == null) {
+            mBackgroundThread = object : Thread() {
+                override fun run() {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+
+                    // Run as long as the thread is enable
+                    while(mRunBackgroundThread.get()) {
+                        reconnectLoop()
+                    }
+                }
+            }
+        }
+
+    }
+
+    /**
+     * Handle the re-connection Loop, Backoff time, Connected Task
+     */
+    private fun reconnectLoop() {
+        Log.d(TAG, "@MSG >> CLIENT RECONNECT LOOP")
+
+        try {
+            connectMqttClient()
+
+        } catch (mqEx: MqttException) {
+
+        }
+    }
+
+    /**
+     * Connect to Mqtt Client (Blocking Operation)
+     */
+    @Throws(MqttException::class)
+    private fun connectMqttClient() {
+        if (mMqttClient.isConnected) {
+            return
+        }
+
+        mMqttClient.connect(configureConnectionOptions())
+
+        for (topic in mSubscriptionTopics) {
+            mMqttClient.subscribe(topic)
+        }
+        onConnection()
+    }
+
+    /**
+     * Configure the MQTT connection options
+     */
+    private fun configureConnectionOptions(): MqttConnectOptions {
+        val options = MqttConnectOptions()
+        // Cloud IoT only supports MQTT 3.1.1, and Paho requires that we explicitly set this.
+        // If you don't set MQTT version, server will immediately close connection to your device.
+        options.mqttVersion = (MqttConnectOptions.MQTT_VERSION_3_1_1)
+        // Cloud IoT Core ignores the user name field, but Paho requires a user name in order
+        // to send the password field. We set the user name because we need the password to send a
+        // JWT to authorize the device.
+        options.userName = "unused"
+        // generate the JWT password
+        options.password = mJwtGenerator.createJwt().toCharArray() // TODO
+        return options
+    }
+
+    /**
+     * Call client's connection callbacks - Connection
+     */
+    private fun onConnection() {
+        mConnectionCallbackExecutor.execute {
+            if(mClientConnectionState.getAndSet(true)) {
+                mConnectionCallback.onConnected()
+            }
+        }
+    }
+
+    /**
+     *  Call client's connection callbacks - Disconnection
+     */
+    private fun onDisconnect(reason: Int) {
+        mConnectionCallbackExecutor.execute {
+            if(reason.compareTo(ConnectionCallback.REASON_NOT_AUTHORIZED)) {
+                
+            }
+        }
+    }
+
 
 
 
