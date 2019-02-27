@@ -14,7 +14,7 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.SSLException
 import org.eclipse.paho.client.mqttv3.MqttException
-
+import kotlin.concurrent.thread
 
 
 /**
@@ -75,7 +75,7 @@ class IotCoreClient(
     private var mRunBackgroundThread: AtomicBoolean, // Control the execution of background thred, The thread stops if mRunBackgroundThread is false
     private val mSubscriptionTopics: List<String> = listOf<String>(),   // Subscription topics
     private val mUnsentTelemetryEvent: TelemetryEvent,  // Store telemetry events failed to sent
-    private var mTelemetryQueue: Queue<TelemetryEvent>?,
+    private var mTelemetryQueue: Queue<TelemetryEvent>, // Queue<TelemetryEvent?>
     private val mConnectionCallback: ConnectionCallback,
     private var mConnectionCallbackExecutor: Executor,
     private val mOnCommandListener: OnCommandListener,
@@ -102,6 +102,9 @@ class IotCoreClient(
     private val mCommandsTopicPrefixRegex = String.format(Locale.US, "^%s/?", mConnectionParams.commandsTopic)
     // Background Thread
     private var mBackgroundThread: Thread? = null
+
+    // Queue of unsent telemetry events.
+    private val mQueueLock = Any()
 
     init {
 
@@ -290,16 +293,16 @@ class IotCoreClient(
         mRunBackgroundThread.set(true)
         // !mBackgroundThread.isAlive TODO
         if(mBackgroundThread == null) {
-            mBackgroundThread = object : Thread() {
-                override fun run() {
-                    Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
 
-                    // Run as long as the thread is enable
-                    while(mRunBackgroundThread.get()) {
-                        reconnectLoop()
-                    }
+            mBackgroundThread = thread(start = true) {
+                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+
+                // Run as long as the thread is enable
+                while(mRunBackgroundThread.get()) {
+                    reconnectLoop()
                 }
             }
+
         }
 
     }
@@ -368,13 +371,56 @@ class IotCoreClient(
      */
     private fun onDisconnect(reason: Int) {
         mConnectionCallbackExecutor.execute {
-            if(reason.compareTo(ConnectionCallback.REASON_NOT_AUTHORIZED)) {
-                
+            if(reason == ConnectionCallback.REASON_NOT_AUTHORIZED) {
+                // Always notify on NOT_AUTHORIZED errors since they mean the client is
+                // misconfigured and needs to do something to fix the problem.
+                mClientConnectionState.set(false)
+                mConnectionCallback.onDisconnected(reason)
+            } else if(mClientConnectionState.getAndSet(false)) {
+                // Otherwise, only notify the client if they have not been notified
+                // about the change in connection yet
+                mConnectionCallback.onDisconnected(reason)
             }
         }
     }
 
+    /**
+     * Returns true if connected to Cloud IoT Core, and returns false otherwise.
+     *
+     * @return whether the client is connection to Cloud IoT Core
+     */
+    fun isConnected(): Boolean {
+        return mMqttClient.isConnected
+    }
 
+    /**
+     * Disconnect the client from Cloud IoT Core.
+     *
+     * <p>This method is non-blocking.
+     *
+     */
+    fun disconnect() {
+        mRunBackgroundThread.set(false)
+        mSemaphore.release()
+    }
+
+    /**
+     * Add a telemetry event to this client's telemetry queue, if it is possible to do so without
+     * violating the telemetry queue's capacity restrictions, and publish the event to
+     * Cloud IoT Core as soon as possible.
+     *
+     * <p>This method is non-blocking.
+     *
+     * @param event the telemetry event to publish
+     * @return Returns true if the event was queued to send, or return false if the event could
+     * not be queued
+     */
+    fun publishTelemetry(event: TelemetryEvent): Boolean {
+        synchronized(mQueueLock) {
+            val preOfferSize = mTelemetryQueue.size
+        }
+
+    }
 
 
 
