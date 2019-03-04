@@ -14,6 +14,7 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.SSLException
 import org.eclipse.paho.client.mqttv3.MqttException
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
 
@@ -71,10 +72,10 @@ class IotCoreClient(
     mConnectionParams: ConnectionParams,   // Info to connect to Cloud IoT Core
     private val mJwtGenerator: JwtGenerator,  // Generate signed JWT to authenticate on Cloud IoT Core
     private val mMqttClient: MqttClient,
+    private val mBackoff: BoundedExponentialBackoff,
     private val mClientConnectionState: AtomicBoolean, // The connection status from Client prospective
     private var mRunBackgroundThread: AtomicBoolean, // Control the execution of background thred, The thread stops if mRunBackgroundThread is false
     private val mSubscriptionTopics: List<String> = listOf<String>(),   // Subscription topics
-    private val mUnsentTelemetryEvent: TelemetryEvent,  // Store telemetry events failed to sent
     private var mTelemetryQueue: Queue<TelemetryEvent>, // Queue<TelemetryEvent?>
     private val mConnectionCallback: ConnectionCallback,
     private var mConnectionCallbackExecutor: Executor,
@@ -102,6 +103,10 @@ class IotCoreClient(
     private val mCommandsTopicPrefixRegex = String.format(Locale.US, "^%s/?", mConnectionParams.commandsTopic)
     // Background Thread
     private var mBackgroundThread: Thread? = null
+    // Store telemetry events failed to sent
+    private val mUnsentTelemetryEvent: TelemetryEvent? = null
+    // Store telemetry events failed to sent
+    private val mUnsentDeviceState: AtomicReference<ByteArray>? = null
 
     // Queue of unsent telemetry events.
     private val mQueueLock = Any()
@@ -316,7 +321,49 @@ class IotCoreClient(
         try {
             connectMqttClient()
 
+            // Successfully connected, so we can reset the backoff time
+            mBackoff.reset()
+
+            // Perform Task that require a connection
+            doConnectedTask()
+
         } catch (mqEx: MqttException) {
+            isRetryableError(mqtt)
+
+        }
+    }
+
+
+    /**
+     * Determine whether the mqttException is an error that may be resolved by retrying or whether
+     * the error cannot be resolved. Determined according to guidance from Cloud IoT Core's
+     * <a href="https://cloud.google.com/iot/docs/how-tos/errors">documentation</a>.
+     *
+     * @return Returns true if the MQTT client should resend the message. Returns false otherwise.
+     */
+    private fun isRetryableError(mqttException: MqttException): Boolean {
+        // Retry using exponential backoff in cases where appropriate. Otherwise, log the failure
+        return when(mqttException.reasonCode){
+            MqttException.REASON_CODE_SERVER_CONNECT_ERROR,
+                MqttException.REASON_CODE_WRITE_TIMEOUT,
+                MqttException.REASON_CODE_CLIENT_NOT_CONNECTED,
+                MqttException.REASON_CODE_CLIENT_TIMEOUT -> true
+            MqttException.REASON_CODE_CLIENT_EXCEPTION ->
+            // This case happens when there is no internet connection. Unfortunately, Paho
+            // doesn't provide a better way to get that information.
+            if(mqttException.cause is UnknownHostException)
+                true
+            MqttException.REASON_CODE_CONNECTION_LOST ->
+            // If the MqttException's cause is an EOFException, then the client or Cloud IoT
+            // Core closed the connection. If mRunBackgroundThread is true, then we know the
+            // client didn't close the connection and the connection was likely closed because
+            // the client was publishing device state updates too quickly. Mark this as a
+            // "retryable" error so the message that caused the exception isn't discarded.
+            if(mqttException.cause is EOFException && mRunBackgroundThread.get())
+                return true
+
+            else -> return false
+
 
         }
     }
@@ -418,8 +465,40 @@ class IotCoreClient(
     fun publishTelemetry(event: TelemetryEvent): Boolean {
         synchronized(mQueueLock) {
             val preOfferSize = mTelemetryQueue.size
+            if(!mTelemetryQueue.offer(event) || mTelemetryQueue.size == preOfferSize) {
+                // Don't increase number of permits in semaphore because event wasn't added to queue
+                return false
+            }
         }
+        mSemaphore.release()
+        return true
+    }
 
+    /**
+     * Publishes state data to Cloud IoT Core.
+     *
+     * <p>If the connection to Cloud IoT Core is lost and messages cannot be published to
+     * Cloud IoT Core, device state is published to Cloud IoT Core before any
+     * unpublished telemetry events when the connection is reestablished.
+     *
+     * <p>If there are multiple attempts to publish device state while disconnected from
+     * Cloud IoT Core, only the newest device state will be published when the connection is
+     * reestablished.
+     *
+     * <p>This method is non-blocking, and state is published using "at least once" semantics.
+     *
+     * <p>Cloud IoT Core limits the number of device state updates per device to 1 per
+     * second. If clients of this library attempt to publish device state faster than that, some
+     * device state data may be lost when Cloud IoT Core resets the connection. The
+     * Cloud IoT Core <a href="https://cloud.google.com/iot/quotas">documentation</a> has more
+     * information about quotas and usage restrictions.
+     *
+     * @param state the device state data to publish
+     */
+    fun publishDeviceState(state: ByteArray) {
+        if(mUnsentDeviceState?.getAndSet(state) == null) {
+            mSemaphore.release()
+        }
     }
 
 
