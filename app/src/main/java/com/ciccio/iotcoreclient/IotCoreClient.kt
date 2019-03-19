@@ -72,6 +72,7 @@ class IotCoreClient(
     mConnectionParams: ConnectionParams,   // Info to connect to Cloud IoT Core
     private val mJwtGenerator: JwtGenerator,  // Generate signed JWT to authenticate on Cloud IoT Core
     private val mMqttClient: MqttClient,
+    private val mConnectionParams: ConnectionParams,
     private val mBackoff: BoundedExponentialBackoff,
     private val mClientConnectionState: AtomicBoolean, // The connection status from Client prospective
     private var mRunBackgroundThread: AtomicBoolean, // Control the execution of background thred, The thread stops if mRunBackgroundThread is false
@@ -104,7 +105,7 @@ class IotCoreClient(
     // Background Thread
     private var mBackgroundThread: Thread? = null
     // Store telemetry events failed to sent
-    private val mUnsentTelemetryEvent: TelemetryEvent? = null
+    private var mUnsentTelemetryEvent: TelemetryEvent? = null
     // Store telemetry events failed to sent
     private val mUnsentDeviceState: AtomicReference<ByteArray>? = null
 
@@ -327,9 +328,103 @@ class IotCoreClient(
             // Perform Task that require a connection
             doConnectedTask()
 
-        } catch (mqEx: MqttException) {
-            isRetryableError(mqtt)
+        } catch (mqttException: MqttException) {
+            isRetryableError(mqttException)
 
+        }
+    }
+
+    /**
+     *
+     */
+    @Throws(MqttException::class)
+    private fun doConnectedTask() {
+        while(isConnected()) {
+            // Block until there is something to do
+            mSemaphore.acquireUninterruptibly()
+            // Semaphore released, so there must be a task to do, if multiple things to do
+            // prioritize as follows:
+            // 1 - Stop the thread if instructed to do so
+            // 2 - Publish device state
+            // 3 - Publish telemetry events
+            // Check whether the thread should continue running
+            if(!mRunBackgroundThread.get()) {
+                return
+            }
+
+            // Check whether there is a device state to send
+            if(mUnsentDeviceState != null) {
+                // Sent device state
+                publish(mConnectionParams.getDeviceStateTopic(), mUnsentDeviceState,
+                    QOS_FOR_DEVICE_STATE_MESSAGES)
+                Log.d(TAG, "Published State $mUnsentDeviceState")
+            }
+
+            handleTelemetry()
+        }
+
+    }
+
+    /**
+     * Handle telemetry event (with queue) and actual state
+     */
+    @Throws(MqttException::class)
+    private fun handleTelemetry() {
+        // Only send events from the client's telemetry queue is there is not an unsent
+        // event already
+        if(mUnsentTelemetryEvent == null) {
+            synchronized(mQueueLock) {
+                mUnsentTelemetryEvent = mTelemetryQueue.poll()
+            }
+
+            if(mUnsentTelemetryEvent == null) {
+                // Nothing to do
+                return
+            }
+        }
+
+        // send the event
+        val unsent = mUnsentTelemetryEvent
+        if(unsent != null) {
+            publish(
+                mConnectionParams.telemetryTopic + unsent.topicSubpath,
+                unsent.data,
+                unsent.qos)
+            Log.d(TAG, "Published telemetry event ${unsent.data}")
+        }
+
+        // Event sent successfully. Clear the cached event.
+        mUnsentTelemetryEvent = null
+    }
+
+    /**
+     * Publish data to a topic
+     */
+    @Throws(MqttException::class)
+    private fun publish(topic: String, data: ByteArray, qos: Int) {
+        try {
+
+        } catch (mqttException: MqttException) {
+            // If there was an error publishing the message, it was either because of an issue with
+            // the way the message itself was formatted or an error with the network.
+            //
+            // In the network error case, the message can be resent when the network is working
+            // again. Rethrow the exception so higher level functions can take care of reconnecting
+            // and resending the message.
+            //
+            // If the message itself was the problem, don't propagate the error since there's
+            // nothing we can do about it except log the error to the client.
+            if(isRetryableError(mqttException)) {
+                // Rethrow and add a permit to the semaphore that controls the background
+                // thread since the background thread removed a permit when trying to publish this
+                // message originally.
+                mSemaphore.release()
+                throw mqttException
+            }
+
+            // Return success and don't try to resend the message that caused the exception. Log
+            // the error so the user has some indication that something went wrong.
+            Log.w(TAG, "Error publishing message to ${topic} >> @EXCEPTION $mqttException")
         }
     }
 
@@ -344,27 +439,33 @@ class IotCoreClient(
     private fun isRetryableError(mqttException: MqttException): Boolean {
         // Retry using exponential backoff in cases where appropriate. Otherwise, log the failure
         return when(mqttException.reasonCode){
-            MqttException.REASON_CODE_SERVER_CONNECT_ERROR,
-                MqttException.REASON_CODE_WRITE_TIMEOUT,
-                MqttException.REASON_CODE_CLIENT_NOT_CONNECTED,
-                MqttException.REASON_CODE_CLIENT_TIMEOUT -> true
-            MqttException.REASON_CODE_CLIENT_EXCEPTION ->
-            // This case happens when there is no internet connection. Unfortunately, Paho
-            // doesn't provide a better way to get that information.
-            if(mqttException.cause is UnknownHostException)
-                true
-            MqttException.REASON_CODE_CONNECTION_LOST ->
-            // If the MqttException's cause is an EOFException, then the client or Cloud IoT
-            // Core closed the connection. If mRunBackgroundThread is true, then we know the
-            // client didn't close the connection and the connection was likely closed because
-            // the client was publishing device state updates too quickly. Mark this as a
-            // "retryable" error so the message that caused the exception isn't discarded.
-            if(mqttException.cause is EOFException && mRunBackgroundThread.get())
-                return true
+            MqttException.REASON_CODE_SERVER_CONNECT_ERROR.toInt(),
+                MqttException.REASON_CODE_WRITE_TIMEOUT.toInt(),
+                MqttException.REASON_CODE_CLIENT_NOT_CONNECTED.toInt(),
+                MqttException.REASON_CODE_CLIENT_TIMEOUT.toInt() -> true
+            MqttException.REASON_CODE_CLIENT_EXCEPTION.toInt() -> {
+                // This case happens when there is no internet connection. Unfortunately, Paho
+                // doesn't provide a better way to get that information.
+                if (mqttException.cause is UnknownHostException) {
+                    true
+                }
+                // Not Retryable Error
+                false
+            }
+            MqttException.REASON_CODE_CONNECTION_LOST.toInt() -> {
+                // If the MqttException's cause is an EOFException, then the client or Cloud IoT
+                // Core closed the connection. If mRunBackgroundThread is true, then we know the
+                // client didn't close the connection and the connection was likely closed because
+                // the client was publishing device state updates too quickly. Mark this as a
+                // "retryable" error so the message that caused the exception isn't discarded.
+                if (mqttException.cause is EOFException && mRunBackgroundThread.get()) {
+                    true
+                }
+                // Not Retryable Error 
+                false
+            }
 
-            else -> return false
-
-
+            else -> false
         }
     }
 
@@ -500,7 +601,6 @@ class IotCoreClient(
             mSemaphore.release()
         }
     }
-
 
 
 }
