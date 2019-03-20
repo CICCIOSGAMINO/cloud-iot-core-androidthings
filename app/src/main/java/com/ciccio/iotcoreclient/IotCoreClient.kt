@@ -92,8 +92,8 @@ class IotCoreClient(
     // Quality of service level ( 1 = at least one / 0 = at most one )
     private val QOS_FOR_DEVICE_STATE_MESSAGES = 1
 
-    // JWT Generator
-    private val mJwtGenerator: JwtGenerator
+    // Handle the MQTT Authentication
+    private val mqttAuthentication: MqttAuthentication
     // MqttClient
     private var mqttClient: MqttClient
     // Semaphore for thread
@@ -111,12 +111,15 @@ class IotCoreClient(
 
     init {
 
-        // Generate signed JWT to authenticate on Cloud IoT Core
-        mJwtGenerator = JwtGenerator(
+        // Handle the Mqtt authentication, Signed JWT to authenticate on Cloud IoT Core
+        // TODO
+        /**
+        mqttAuthentication = MqttAuthentication(
             keyPair,
             mConnectionParams.projectId,
             Duration.ofMillis(mConnectionParams.authTokenLifetime)
-        )
+        ) */
+        mqttAuthentication = MqttAuthentication()
 
         if(mTelemetryQueue == null) {
             mTelemetryQueue = CapacityQueue<TelemetryEvent>(DEFAULT_QUEUE_CAPACITY, CapacityQueue.DROP_POLICY_HEAD)
