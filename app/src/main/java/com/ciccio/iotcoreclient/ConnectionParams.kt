@@ -1,6 +1,5 @@
 package com.ciccio.iotcoreclient
 
-import java.lang.IllegalArgumentException
 import java.time.Duration
 
 /**
@@ -15,14 +14,11 @@ import java.time.Duration
  */
 
 class ConnectionParams(
-        mProjectId : String,    // GCP Cloud Project name
-        mRegistryId : String,   // Cloud IoT Registry name
-        mDeviceId : String,     // Cloud IoT Device Id
-        mCloudRegion : String,  // GCP Cloud Region
-        mBridgeHostname : String,   // MQTT Bridge hostname
-        mBridgePort : Int,      // MQTT Bridge port
-        mAuthTokenLifetimeMills : Long  // Duration JWT Token
-
+        val projectId : String,    // GCP Cloud Project name
+        val registryId : String,   // Cloud IoT Registry name
+        val deviceId : String,     // Cloud IoT Device Id
+        val cloudRegion : String,  // GCP Cloud Region
+        val authTokenLifetime: Long = DEFAULT_AUTH_TOKEN_LIFETIME_MILLIS// Auth Token Lifetime in Mills
 ) {
 
     // Cached Cloud IoT Core client Id
@@ -43,32 +39,18 @@ class ConnectionParams(
 
         val DEFAULT_BRIDGE_HOSTNAME = "mqtt.googleapis.com"
         val DEFAULT_BRIDGE_PORT = 8883
-        val MAX_TCP_PORT = 65535
         val DEFAULT_AUTH_TOKEN_LIFETIME_MILLIS = Duration.ofHours(1).toMillis()
 
     }
 
     init {
 
-        if(mBridgePort <= 0) {
-            throw IllegalArgumentException("MQTT Bridge Port must be > 0")
-        }
-        if(mBridgePort > MAX_TCP_PORT) {
-            throw IllegalArgumentException("MQTT Bridge Port must be < $MAX_TCP_PORT")
-        }
-        if(mAuthTokenLifetimeMills <= 0) {
-            throw IllegalArgumentException("JWT Auth Token Lifetime must be > 0")
-        }
-        if(mAuthTokenLifetimeMills > Duration.ofHours(24).toMillis()){
-            throw IllegalArgumentException("JWT Auth Token Lifetime cannot exceed 24 hours")
-        }
-
-        brokerUrl = "ssl://$mBridgeHostname:$mBridgePort"
-        clientId = "projects/$mProjectId/locations/$mCloudRegion/registries/$mRegistryId/devices/$mDeviceId"
-        telemetryTopic = "/devices/$mDeviceId/events"
-        deviceStateTopic = "/devices/$mDeviceId/state"
-        configurationTopic = "/devices/$mDeviceId/config"
-        commandsTopic = "/devices/$mDeviceId/commands"
+        brokerUrl = "ssl://$DEFAULT_BRIDGE_HOSTNAME:$DEFAULT_BRIDGE_PORT"
+        clientId = "projects/$projectId/locations/$cloudRegion/registries/$registryId/devices/$deviceId"
+        telemetryTopic = "/devices/$deviceId/events"
+        deviceStateTopic = "/devices/$deviceId/state"
+        configurationTopic = "/devices/$deviceId/config"
+        commandsTopic = "/devices/$deviceId/commands"
     }
 
 }

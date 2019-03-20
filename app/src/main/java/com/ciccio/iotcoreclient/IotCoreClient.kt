@@ -14,6 +14,8 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.SSLException
 import org.eclipse.paho.client.mqttv3.MqttException
+import java.security.KeyPair
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
@@ -69,10 +71,9 @@ import kotlin.concurrent.thread
 private val TAG = IotCoreClient::class.java.simpleName
 
 class IotCoreClient(
-    mConnectionParams: ConnectionParams,   // Info to connect to Cloud IoT Core
-    private val mJwtGenerator: JwtGenerator,  // Generate signed JWT to authenticate on Cloud IoT Core
+    private val mConnectionParams: ConnectionParams,   // Info to connect to Cloud IoT Core
+    private val keyPair: KeyPair,
     private val mMqttClient: MqttClient,
-    private val mConnectionParams: ConnectionParams,
     private val mBackoff: BoundedExponentialBackoff,
     private val mClientConnectionState: AtomicBoolean, // The connection status from Client prospective
     private var mRunBackgroundThread: AtomicBoolean, // Control the execution of background thred, The thread stops if mRunBackgroundThread is false
@@ -85,20 +86,16 @@ class IotCoreClient(
     private val mOnConfigurationListener: OnConfigurationListener,
     private var mOnConfigurationExecutor: Executor
 ){
-
-    // Settings for exponential backoff behavior. These values are from Cloud IoT Core's recommendations at
-    // https://cloud.google.com/iot/docs/requirements#managing_excessive_load_with_exponential_backoff
-    private val INITIAL_RETRY_INTERVAL_MS: Long = 1000
-    private val MAX_RETRY_JITTER_MS = 1000
-    private val MAX_RETRY_INTERVAL_MS = (64 * 1000).toLong()
-
     // Default telemetry queue capacity
     private val DEFAULT_QUEUE_CAPACITY = 1000
 
     // Quality of service level ( 1 = at least one / 0 = at most one )
     private val QOS_FOR_DEVICE_STATE_MESSAGES = 1
 
-    private lateinit var mqttClient: MqttClient
+    // JWT Generator
+    private val mJwtGenerator: JwtGenerator
+    // MqttClient
+    private var mqttClient: MqttClient
     // Semaphore for thread
     private val mSemaphore = Semaphore(0)
     private val mCommandsTopicPrefixRegex = String.format(Locale.US, "^%s/?", mConnectionParams.commandsTopic)
@@ -113,6 +110,13 @@ class IotCoreClient(
     private val mQueueLock = Any()
 
     init {
+
+        // Generate signed JWT to authenticate on Cloud IoT Core
+        mJwtGenerator = JwtGenerator(
+            keyPair,
+            mConnectionParams.projectId,
+            Duration.ofMillis(mConnectionParams.authTokenLifetime)
+        )
 
         if(mTelemetryQueue == null) {
             mTelemetryQueue = CapacityQueue<TelemetryEvent>(DEFAULT_QUEUE_CAPACITY, CapacityQueue.DROP_POLICY_HEAD)
@@ -355,7 +359,7 @@ class IotCoreClient(
             // Check whether there is a device state to send
             if(mUnsentDeviceState != null) {
                 // Sent device state
-                publish(mConnectionParams.getDeviceStateTopic(), mUnsentDeviceState,
+                publish(mConnectionParams.deviceStateTopic, mUnsentDeviceState.get(),
                     QOS_FOR_DEVICE_STATE_MESSAGES)
                 Log.d(TAG, "Published State $mUnsentDeviceState")
             }
@@ -499,7 +503,7 @@ class IotCoreClient(
         // JWT to authorize the device.
         options.userName = "unused"
         // generate the JWT password
-        options.password = mJwtGenerator.createJwt().toCharArray() // TODO
+        options.password = mJwtGenerator.createJwt().toCharArray()
         return options
     }
 
