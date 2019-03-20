@@ -112,13 +112,6 @@ class IotCoreClient(
     init {
 
         // Handle the Mqtt authentication, Signed JWT to authenticate on Cloud IoT Core
-        // TODO
-        /**
-        mqttAuthentication = MqttAuthentication(
-            keyPair,
-            mConnectionParams.projectId,
-            Duration.ofMillis(mConnectionParams.authTokenLifetime)
-        ) */
         mqttAuthentication = MqttAuthentication()
 
         if(mTelemetryQueue == null) {
@@ -506,7 +499,7 @@ class IotCoreClient(
         // JWT to authorize the device.
         options.userName = "unused"
         // generate the JWT password
-        options.password = mJwtGenerator.createJwt().toCharArray()
+        options.password = mqttAuthentication.createJwt(mConnectionParams.projectId)
         return options
     }
 

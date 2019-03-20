@@ -6,6 +6,9 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
+import io.jsonwebtoken.Jwts
+import io.jsonwebtoken.SignatureAlgorithm
+import org.joda.time.DateTime
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.FileOutputStream
@@ -22,63 +25,48 @@ private val TAG = MqttAuthentication::class.java.simpleName
 
 class MqttAuthentication {
 
-    private val DEFAULT_KEYSTORE = "AndroidKeyStore"
-    private val KEY_ALIAS = "cloudiotauth"
-    private val FILE_PUB_KEY = "rs256_x509.pub"
+    companion object {
+        private val DEFAULT_KEYSTORE = "AndroidKeyStore"
+        private val KEY_ALIAS = "cloudiotauth"
+        private val FILE_PUB_KEY = "rs256_x509.pub"
 
-    /** Years Certification Expiration */
-    private val CERT_EXPIRATION = 20
-
-    private var certificate : Certificate? = null
-    private var privateKey : PrivateKey? = null
-
-    init {
-        try {
-
-        } catch (generalSecurityException: GeneralSecurityException) {
-            Log.w(TAG, "Security ")
-        } catch (ioExceptions: IOException) {
-            Log.w(TAG, )
-        }
+        /** Minutes Certification Expiration */
+        private val JWT_TOKEN_EXPIRATION = 20
     }
 
-    fun initialize() {
+    private lateinit var keyStore: KeyStore
+    private lateinit var certificate : Certificate
+    private lateinit var privateKey : PrivateKey
+
+    init {
 
         try {
+            keyStore = KeyStore.getInstance(DEFAULT_KEYSTORE)
+            keyStore.load(null)
 
-            val ks = KeyStore.getInstance(DEFAULT_KEYSTORE)
-            ks.load(null)
+            certificate = keyStore.getCertificate(KEY_ALIAS)
 
-            certificate = ks.getCertificate(KEY_ALIAS)
             if (certificate == null) {
                 /** Generate Key */
                 Log.d(ContentValues.TAG, "No X509Certificate FOUND (Creating .... ) ")
 
                 generateAuthenticationKey()
-                certificate = ks.getCertificate(KEY_ALIAS)
+                certificate = keyStore.getCertificate(KEY_ALIAS)
             }
             Log.d(ContentValues.TAG, "Loaded certificate : " + KEY_ALIAS)
 
-            /** Log the Certificate  DEBUG
-            if (certificate is X509Certificate) {
-            val x509Certificate : X509Certificate = certificate as X509Certificate
-            Log.d(TAG, "Subject: " + x509Certificate.subjectX500Principal.toString())
-            Log.d(TAG, "Issuer: " + x509Certificate.issuerX500Principal.toString())
-            Log.d(TAG, "Signature: " + x509Certificate.signature)
-            } */
-
-            val key : Key = ks.getKey(KEY_ALIAS, null)
+            val key : Key = keyStore.getKey(KEY_ALIAS, null)
             privateKey = key as PrivateKey
 
             exportPublicKey(FILE_PUB_KEY)
 
-        } catch (ioex : GeneralSecurityException) {
-            Log.e(ContentValues.TAG, "@EXCEPTION >> Failed to open keystore ", ioex)
-        } catch (gsex : IOException) {
-            Log.e(ContentValues.TAG, "@EXCEPTION >> General IO Exception ", gsex)
+        } catch (generalSecurityException: GeneralSecurityException) {
+            Log.w(TAG, "@SECURITY_EXCEPTION >> $generalSecurityException")
+        } catch (ioExceptions: IOException) {
+            Log.w(TAG, "@IOEXCEPTION >> $ioExceptions" )
         }
-
     }
+
 
     /**
      * Generate a new RSA Key pair entry in the Android keystore by
@@ -142,12 +130,6 @@ class MqttAuthentication {
         return sb.toString()
     }
 
-    /**
-     * GEt the private Key
-     */
-    fun getPrivateKey() : PrivateKey? {
-        return privateKey
-    }
 
     /**
      * Create the Auth JWT token for the device
@@ -156,7 +138,7 @@ class MqttAuthentication {
         InvalidKeySpecException::class,
         NoSuchAlgorithmException::class,
         IOException::class)
-    fun createJWT(projectId : String) : CharArray {
+    fun createJwt(projectId : String) : CharArray {
         val now = DateTime()
         /** Create a JWT token to authenticate this device, the device
          * will be disconnected after the token expires, audience field
@@ -164,7 +146,7 @@ class MqttAuthentication {
          */
         val jwtBuilder = Jwts.builder()
             .setIssuedAt(now.toDate())
-            .setExpiration(now.plusMinutes(CERT_EXPIRATION).toDate())
+            .setExpiration(now.plusMinutes(JWT_TOKEN_EXPIRATION).toDate())
             .setAudience(projectId)
 
         return jwtBuilder.signWith(SignatureAlgorithm.RS256, privateKey).compact().toCharArray()
