@@ -1,6 +1,5 @@
 package com.ciccio.iotcoreclient
 
-import android.content.ContentValues
 import android.os.Environment
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -26,12 +25,14 @@ private val TAG = MqttAuthentication::class.java.simpleName
 class MqttAuthentication {
 
     companion object {
-        private val DEFAULT_KEYSTORE = "AndroidKeyStore"
-        private val KEY_ALIAS = "cloudiotauth"
-        private val FILE_PUB_KEY = "rs256_x509.pub"
+        const val DEFAULT_KEYSTORE = "AndroidKeyStore"
+        const val KEY_ALIAS = "cloudiotauth"
+        const val FILE_PUB_KEY = "rs256_x509.pub"
 
-        /** Minutes Certification Expiration */
-        private val JWT_TOKEN_EXPIRATION = 20
+        /** Years KeyPairs Expiration */
+        const val KEY_PAIR_EXPIRATION = 20
+        /** Minutes Jwt Token Expiration */
+        const val JWT_TOKEN_EXPIRATION = 20
     }
 
     private lateinit var keyStore: KeyStore
@@ -48,12 +49,12 @@ class MqttAuthentication {
 
             if (certificate == null) {
                 /** Generate Key */
-                Log.d(ContentValues.TAG, "No X509Certificate FOUND (Creating .... ) ")
+                Log.d(TAG, "No X509Certificate FOUND (Creating .... ) ")
 
                 generateAuthenticationKey()
                 certificate = keyStore.getCertificate(KEY_ALIAS)
             }
-            Log.d(ContentValues.TAG, "Loaded certificate : " + KEY_ALIAS)
+            Log.d(TAG, "Loaded certificate : " + KEY_ALIAS)
 
             val key : Key = keyStore.getKey(KEY_ALIAS, null)
             privateKey = key as PrivateKey
@@ -75,6 +76,9 @@ class MqttAuthentication {
      */
     @Throws(GeneralSecurityException::class)
     fun generateAuthenticationKey() {
+
+        val now = DateTime()
+
         val kpg : KeyPairGenerator = KeyPairGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_RSA, DEFAULT_KEYSTORE)
         kpg.initialize(
@@ -83,6 +87,7 @@ class MqttAuthentication {
                 .setCertificateSubject(X500Principal("CN=unused"))
                 .setDigests(KeyProperties.DIGEST_SHA256)
                 .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
+                .setKeyValidityEnd(now.plusYears(KEY_PAIR_EXPIRATION).toDate())
                 .build())
         kpg.generateKeyPair()
 
@@ -90,7 +95,7 @@ class MqttAuthentication {
 
     /**
      * Exports the authentication certificate to a file
-     * @param destination the file to write the certificate to PEM encoded
+     * @param fileName the file to write the certificate to PEM encoded
      */
     @Throws(
         GeneralSecurityException::class,
@@ -108,22 +113,16 @@ class MqttAuthentication {
             fos.flush()
             fos.close()
         } catch (fex : FileNotFoundException) {
-            Log.e(ContentValues.TAG, " @EXCEPTION >> ", fex)
+            Log.e(TAG, " @EXCEPTION >> ", fex)
         }
     }
 
-    /**
-     * Get the Certificate
-     */
-    fun getCertificate() : Certificate? {
-        return certificate
-    }
 
     /**
      * Get the certificate in PEM-format encoded
      */
     fun getCertificatePEM() : String {
-        var sb = StringBuilder()
+        val sb = StringBuilder()
         sb.append("-----BEGIN CERTIFICATE-----\n")
         sb.append(Base64.encodeToString(certificate?.encoded, Base64.DEFAULT))
         sb.append("-----END CERTIFICATE-----\n")

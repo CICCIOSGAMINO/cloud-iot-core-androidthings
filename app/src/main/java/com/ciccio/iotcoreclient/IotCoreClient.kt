@@ -15,7 +15,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.SSLException
 import org.eclipse.paho.client.mqttv3.MqttException
 import java.security.KeyPair
-import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
