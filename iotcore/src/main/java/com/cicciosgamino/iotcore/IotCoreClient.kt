@@ -1,4 +1,4 @@
-package com.ciccio.iotcoreclient
+package com.cicciosgamino.iotcore
 
 import android.os.Process
 import android.util.Log
@@ -14,7 +14,6 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.SSLException
 import org.eclipse.paho.client.mqttv3.MqttException
-import java.security.KeyPair
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
@@ -30,7 +29,7 @@ import kotlin.concurrent.thread
  *    <li>Receiving commands</li>
  * </ul>
  *
- * <p>Create a new IotCoreClient using the {@link IotCoreClient.Builder}, and call
+ * <p>Create a new IotCoreClient using the {@link IotCoreClient()}, and call
  * {@link IotCoreClient#connect()} to initialize the client connection. When you no longer
  * need to send and receive data, call {@link IotCoreClient#disconnect()} to close the connection
  * and free up resources.
@@ -48,34 +47,31 @@ import kotlin.concurrent.thread
  * changes from Cloud IoT Core.
  *
  * <pre class="prettyprint">
- *     IotCoreClient iotCoreClient = new IotCoreClient.Builder()
- *             .setConnectionParams(connectionParams)
- *             .setKeyPair(keyPair);
- *             .setOnConfigurationListener(onConfigurationListener)
- *             .setOnCommandListener(onCommandListener)
- *             .setConnectionCallback(connectionCallback)
- *             .build();
- *     iotCoreClient.connect();
- *     iotCoreClient.publishDeviceState("Hello world!".getBytes());
+ *     private val iotCoreClient:IotCoreClient  = IotCoreClient(
+                params,
+ *          )
+ *     iotCoreClient.connect()
+ *     iotCoreClient.publishDeviceState("Hello world!".getBytes())
  * </pre>
+ * 
+ * @param initialBackoffMillis minimum backoff time in milliseconds
+ * @param maxBackoffMillis maximum backoff time in milliseconds
+ * @param jitterMillis maximum variation in backoff time in milliseconds.
  *
  * <p>While disconnected, the client queues all messages for delivery when the connection is
- * restored. To customize the behavior of the offline message queue, call
- * {@link IotCoreClient.Builder#setTelemetryQueue(Queue)} with a queue implementation suited to
- * your application. If no queue implementation is provided, the default queue implementation is a
- * queue that stores up to 1000 telemetry events and drops events from the head of the queue when
- * messages are inserted beyond the maximum capacity.
+ * restored. To customize the behavior of the offline message queue, pass a Queue to class
+ * with a queue implementation suited to your application. If no queue implementation is provided,
+ * the default queue implementation is a queue that stores up to 1000 telemetry events and drops
+ * events from the head of the queue when messages are inserted beyond the maximum capacity.
+ *
  */
 
 private val TAG = IotCoreClient::class.java.simpleName
 
 class IotCoreClient(
-    private val mConnectionParams: ConnectionParams,   // Info to connect to Cloud IoT Core
-    private val keyPair: KeyPair,
-    private val mMqttClient: MqttClient,
-    private val mBackoff: BoundedExponentialBackoff,
-    private val mClientConnectionState: AtomicBoolean, // The connection status from Client prospective
-    private var mRunBackgroundThread: AtomicBoolean, // Control the execution of background thred, The thread stops if mRunBackgroundThread is false
+    private val mConnectionParams: ConnectionParams,        // Params to connect to cloud iot core
+    private val mClientConnectionState: AtomicBoolean,      // Client connection status
+    private var mRunBackgroundThread: AtomicBoolean,        // Control the execution of background thred, The thread stops if mRunBackgroundThread is false
     private val mSubscriptionTopics: List<String> = listOf<String>(),   // Subscription topics
     private var mTelemetryQueue: Queue<TelemetryEvent>, // Queue<TelemetryEvent?>
     private val mConnectionCallback: ConnectionCallback,
@@ -95,6 +91,8 @@ class IotCoreClient(
     private val mqttAuthentication: MqttAuthentication
     // MqttClient
     private var mqttClient: MqttClient
+    // BoundedExponentialBackoff (handle the re-connecting backoff)
+    private val backoff: BoundedExponentialBackoff
     // Semaphore for thread
     private val mSemaphore = Semaphore(0)
     private val mCommandsTopicPrefixRegex = String.format(Locale.US, "^%s/?", mConnectionParams.commandsTopic)
@@ -114,8 +112,13 @@ class IotCoreClient(
         mqttAuthentication = MqttAuthentication()
 
         if(mTelemetryQueue == null) {
-            mTelemetryQueue = CapacityQueue<TelemetryEvent>(DEFAULT_QUEUE_CAPACITY, CapacityQueue.DROP_POLICY_HEAD)
+            mTelemetryQueue = CapacityQueue<TelemetryEvent>(
+                DEFAULT_QUEUE_CAPACITY,
+                CapacityQueue.DROP_POLICY_HEAD
+            )
         }
+
+        backoff = BoundedExponentialBackoff()
 
         if(mOnConfigurationListener != null && mOnConfigurationExecutor == null) {
             mOnConfigurationExecutor = createDefaultExecutor()
@@ -159,7 +162,7 @@ class IotCoreClient(
         }
 
         // With Kotlin Object declaration, define the Mqtt Callbacks
-        mMqttClient.setCallback(object: MqttCallback {
+        mqttClient.setCallback(object: MqttCallback {
 
             override fun connectionLost(cause: Throwable?) {
                 // Release the semaphore blocking the background thread so it reconnects to IoT Core
@@ -322,7 +325,7 @@ class IotCoreClient(
             connectMqttClient()
 
             // Successfully connected, so we can reset the backoff time
-            mBackoff.reset()
+            backoff.reset()
 
             // Perform Task that require a connection
             doConnectedTask()
@@ -473,14 +476,14 @@ class IotCoreClient(
      */
     @Throws(MqttException::class)
     private fun connectMqttClient() {
-        if (mMqttClient.isConnected) {
+        if (mqttClient.isConnected) {
             return
         }
 
-        mMqttClient.connect(configureConnectionOptions())
+        mqttClient.connect(configureConnectionOptions())
 
         for (topic in mSubscriptionTopics) {
-            mMqttClient.subscribe(topic)
+            mqttClient.subscribe(topic)
         }
         onConnection()
     }
@@ -537,7 +540,7 @@ class IotCoreClient(
      * @return whether the client is connection to Cloud IoT Core
      */
     fun isConnected(): Boolean {
-        return mMqttClient.isConnected
+        return mqttClient.isConnected
     }
 
     /**

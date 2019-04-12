@@ -1,4 +1,4 @@
-package com.ciccio.iotcoreclient
+package com.cicciosgamino.iotcore
 
 import android.os.Environment
 import android.security.keystore.KeyGenParameterSpec
@@ -80,7 +80,8 @@ class MqttAuthentication {
         val now = DateTime()
 
         val kpg : KeyPairGenerator = KeyPairGenerator.getInstance(
-            KeyProperties.KEY_ALGORITHM_RSA, DEFAULT_KEYSTORE)
+            KeyProperties.KEY_ALGORITHM_RSA, DEFAULT_KEYSTORE
+        )
         kpg.initialize(
             KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_SIGN)
                 .setKeySize(2048)

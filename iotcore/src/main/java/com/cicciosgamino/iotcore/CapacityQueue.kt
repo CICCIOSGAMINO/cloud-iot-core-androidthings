@@ -1,4 +1,4 @@
-package com.ciccio.iotcoreclient
+package com.cicciosgamino.iotcore
 
 import android.util.Log
 import java.lang.IllegalArgumentException
@@ -37,7 +37,8 @@ internal class CapacityQueue<E>(
             throw IllegalArgumentException("Queue capacity must be greater than 0")
         }
         if(mDropPolicy != DROP_POLICY_HEAD &&
-                mDropPolicy != DROP_POLICY_TAIL) {
+                mDropPolicy != DROP_POLICY_TAIL
+        ) {
             throw IllegalArgumentException("Queue drop policy must be DROP_POLICY_HEAD or DROP_POLICY_TAIL")
         }
 

@@ -1,4 +1,4 @@
-package com.ciccio.iotcoreclient
+package com.cicciosgamino.iotcore
 
 interface OnCommandListener {
 

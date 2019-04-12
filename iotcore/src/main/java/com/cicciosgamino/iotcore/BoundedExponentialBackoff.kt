@@ -1,4 +1,4 @@
-package com.ciccio.iotcoreclient
+package com.cicciosgamino.iotcore
 
 import android.os.SystemClock
 import java.lang.IllegalArgumentException
@@ -10,47 +10,56 @@ import kotlin.random.Random
  * BoundedExponentialBackoff instance with backoff starting value, the maximum time
  * to backoff, and the maximum amount of jitter, or randomness, to include in the backoff time.
  *
- * @param mInitialBackoffMillis minimum backoff time in milliseconds
- * @param mMaxBackoffMillis maximum backoff time in milliseconds
- * @param mJitterMillis maximum variation in backoff time in milliseconds.
+ * @param initialBackoffMillis minimum backoff time in milliseconds
+ * @param maxBackoffMillis maximum backoff time in milliseconds
+ * @param jitterMillis maximum variation in backoff time in milliseconds.
+ *
+ * Settings for exponential backoff behavior. These values are from Cloud IoT Core's
+ * recommendations at
+ * https://cloud.google.com/iot/docs/requirements#managing_excessive_load_with_exponential_backoff
+ *
+ * INITIAL_RETRY_INTERVAL_MS = 1000;
+ * MAX_RETRY_JITTER_MS = 1000;
+ * MAX_RETRY_INTERVAL_MS = 64 * 1000;
+ *
 */
 class BoundedExponentialBackoff(
-        private val mInitialBackoffMillis: Long,
-        private val mMaxBackoffMillis: Long,
-        private val mJitterMillis: Long
+        private val initialBackoffMillis: Long = 1000,
+        private val jitterMillis: Long = 1000,
+        private val maxBackoffMillis: Long = 64 * 1000
 ) {
 
     private val mRandom: Random
     private var mCurrentBackoffDurationMillis: Long
 
     init {
-        if(mInitialBackoffMillis <= 0)
+        if(initialBackoffMillis <= 0)
             throw  IllegalArgumentException("@EXCEPION >> Initial Backoff time must be > 0")
-        if(mMaxBackoffMillis <= 0)
+        if(maxBackoffMillis <= 0)
             throw  IllegalArgumentException("@EXCEPION >> Maximum Backoff time must be > 0")
-        if(mJitterMillis < 0)
+        if(jitterMillis < 0)
             throw  IllegalArgumentException("@EXCEPION >> Jitter Backoff time must be >= 0")
-        if(mMaxBackoffMillis < mInitialBackoffMillis)
+        if(maxBackoffMillis < initialBackoffMillis)
             throw IllegalArgumentException("@EXCEPTION >> Maximum Backoff time must be >= Initial")
 
-        mCurrentBackoffDurationMillis = mInitialBackoffMillis
+        mCurrentBackoffDurationMillis = initialBackoffMillis
         mRandom = Random(SystemClock.currentThreadTimeMillis())
     }
 
 
     /** Reset the backoff interval */
     fun reset() {
-        mCurrentBackoffDurationMillis = mInitialBackoffMillis
+        mCurrentBackoffDurationMillis = initialBackoffMillis
     }
 
     /** Return a Backoff exponentially larger then the last */
     fun nextBackoff(): Long {
-        val jitter = if (mJitterMillis === 0L) 0 else mRandom.nextLong(mJitterMillis)
+        val jitter = if (jitterMillis == 0L) 0 else mRandom.nextLong(jitterMillis)
         val backoff = mCurrentBackoffDurationMillis + jitter
 
         mCurrentBackoffDurationMillis = mCurrentBackoffDurationMillis shl 1
-        if(mCurrentBackoffDurationMillis > mMaxBackoffMillis)
-            mCurrentBackoffDurationMillis = mMaxBackoffMillis
+        if(mCurrentBackoffDurationMillis > maxBackoffMillis)
+            mCurrentBackoffDurationMillis = maxBackoffMillis
 
         return backoff
     }
