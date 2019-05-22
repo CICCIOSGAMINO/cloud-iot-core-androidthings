@@ -5,13 +5,11 @@ apply plugin: 'kotlin-android'
 apply plugin: 'kotlin-android-extensions'
 
 android {
-    compileSdkVersion 28
+    compileSdkVersion rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "com.ciccio.iotcoreclient"
-        minSdkVersion 27
-        targetSdkVersion 28
-        versionCode 1
-        versionName "1.0"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
@@ -24,27 +22,12 @@ android {
 
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
-    testImplementation 'junit:junit:4.12'
-    androidTestImplementation 'androidx.test:runner:1.1.0-alpha4'
-    androidTestImplementation 'androidx.test.espresso:espresso-core:3.1.0-alpha4'
-    compileOnly 'com.google.android.things:androidthings:+'
+    testImplementation 'junit:junit:4.13-beta-3'
+    androidTestImplementation 'androidx.test:runner:1.2.0-beta01'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.2.0-beta01'
     implementation"org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
 
-    // Set implementation of iotcore module
+    // Implement the com.cicciosgamino.iotcore module
     implementation project(':iotcore')
 
-    /**
-    // MQTT
-    implementation('org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.0') {
-        exclude group: 'com.google.android', module: 'support-v4'
-    }
-    implementation('org.eclipse.paho:org.eclipse.paho.android.service:1.1.1') {
-        exclude group: 'com.google.android', module: 'support-v4'
-    }
-
-    // JWT Handler
-    implementation 'io.jsonwebtoken:jjwt:0.9.0'
-
-    // Koda-Time (DateTime and other time helper)
-    implementation 'com.github.debop:koda-time:2.0.0' */
 }

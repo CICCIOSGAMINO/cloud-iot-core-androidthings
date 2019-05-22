@@ -53,10 +53,10 @@ import kotlin.concurrent.thread
  *     iotCoreClient.connect()
  *     iotCoreClient.publishDeviceState("Hello world!".getBytes())
  * </pre>
- * 
- * @param initialBackoffMillis minimum backoff time in milliseconds
- * @param maxBackoffMillis maximum backoff time in milliseconds
- * @param jitterMillis maximum variation in backoff time in milliseconds.
+ *
+ * @param connectionParams Parameters needed to connect to Google Cloud IoT Core
+ * @param subscriptionTopics List with all subscription topics
+ * @param telemetryQueue Queue to retain the <TelemetryEvent?> when no connection available
  *
  * <p>While disconnected, the client queues all messages for delivery when the connection is
  * restored. To customize the behavior of the offline message queue, pass a Queue to class
@@ -69,17 +69,12 @@ import kotlin.concurrent.thread
 private val TAG = IotCoreClient::class.java.simpleName
 
 class IotCoreClient(
-    private val mConnectionParams: ConnectionParams,        // Params to connect to cloud iot core
-    private val mClientConnectionState: AtomicBoolean,      // Client connection status
-    private var mRunBackgroundThread: AtomicBoolean,        // Control the execution of background thred, The thread stops if mRunBackgroundThread is false
-    private val mSubscriptionTopics: List<String> = listOf<String>(),   // Subscription topics
-    private var mTelemetryQueue: Queue<TelemetryEvent>, // Queue<TelemetryEvent?>
-    private val mConnectionCallback: ConnectionCallback,
-    private var mConnectionCallbackExecutor: Executor,
-    private val mOnCommandListener: OnCommandListener,
-    private var mOnCommandExecutor: Executor,
-    private val mOnConfigurationListener: OnConfigurationListener,
-    private var mOnConfigurationExecutor: Executor
+    private val connectionParams: ConnectionParams,
+    private val subscriptionTopics: List<String> = listOf<String>(),
+    private var telemetryQueue: Queue<TelemetryEvent>,
+    private val connectionCallback: ConnectionCallback,
+    private val onCommandListener: OnCommandListener,
+    private val onConfigurationListener: OnConfigurationListener
 ){
     // Default telemetry queue capacity
     private val DEFAULT_QUEUE_CAPACITY = 1000
@@ -91,11 +86,16 @@ class IotCoreClient(
     private val mqttAuthentication: MqttAuthentication
     // MqttClient
     private var mqttClient: MqttClient
+    // MqttClient Connection state
+    private val clientConnectionState = AtomicBoolean(false)
     // BoundedExponentialBackoff (handle the re-connecting backoff)
     private val backoff: BoundedExponentialBackoff
+    // Control the execution of background thred, The thread stops if mRunBackgroundThread is false
+    private val runBackgroundThread = AtomicBoolean(false)
+
     // Semaphore for thread
     private val mSemaphore = Semaphore(0)
-    private val mCommandsTopicPrefixRegex = String.format(Locale.US, "^%s/?", mConnectionParams.commandsTopic)
+    private val mCommandsTopicPrefixRegex = String.format(Locale.US, "^%s/?", connectionParams.commandsTopic)
     // Background Thread
     private var mBackgroundThread: Thread? = null
     // Store telemetry events failed to sent
@@ -111,8 +111,8 @@ class IotCoreClient(
         // Handle the Mqtt authentication, Signed JWT to authenticate on Cloud IoT Core
         mqttAuthentication = MqttAuthentication()
 
-        if(mTelemetryQueue == null) {
-            mTelemetryQueue = CapacityQueue<TelemetryEvent>(
+        if(telemetryQueue == null) {
+            telemetryQueue = CapacityQueue<TelemetryEvent>(
                 DEFAULT_QUEUE_CAPACITY,
                 CapacityQueue.DROP_POLICY_HEAD
             )
@@ -120,23 +120,11 @@ class IotCoreClient(
 
         backoff = BoundedExponentialBackoff()
 
-        if(mOnConfigurationListener != null && mOnConfigurationExecutor == null) {
-            mOnConfigurationExecutor = createDefaultExecutor()
-        }
-
-        if(mOnCommandListener != null && mOnCommandExecutor == null) {
-            mOnCommandExecutor = createDefaultExecutor()
-        }
-
-        if(mConnectionCallback != null && mConnectionCallbackExecutor == null) {
-            mConnectionCallbackExecutor = createDefaultExecutor()
-        }
-
         // Init the Mqtt
         try {
             mqttClient = MqttClient(
-                mConnectionParams.brokerUrl,
-                mConnectionParams.clientId,
+                connectionParams.brokerUrl,
+                connectionParams.clientId,
                 MemoryPersistence()
             )
         } catch (e: MqttException) {
@@ -179,28 +167,22 @@ class IotCoreClient(
 
                 if (message?.payload != null && topic != null) {
 
-                    if(mConnectionParams.configurationTopic.equals(topic, true) &&
-                        mOnConfigurationListener != null &&
-                        mOnConfigurationExecutor != null) {
+                    if(connectionParams.configurationTopic.equals(topic, true)) {
                         // Call the client's onConfigurationListner
-                        mOnConfigurationExecutor.execute { mOnConfigurationListener.onConfigurationReceived(message.payload) }
+                        onConfigurationListener.onConfigurationReceived(message.payload)
 
-                    } else if(topic.startsWith(mConnectionParams.commandsTopic) &&
-                        mOnCommandListener != null &&
-                        mOnCommandExecutor != null) {
+                    } else if(topic.startsWith(connectionParams.commandsTopic)) {
                         // Call the client's OnCommandListener
                         val subFolder = topic.replaceFirst(mCommandsTopicPrefixRegex, "")
-                        mOnCommandExecutor.execute {
-                            mOnCommandListener.onCommandReceived(subFolder, message.payload)
-                        }
-
+                        onCommandListener.onCommandReceived(subFolder, message.payload)
                     }
 
-                } // End Null Check
+                }
 
             }
 
             override fun deliveryComplete(token: IMqttDeliveryToken?) {
+                Log.d(TAG , "@MSG >> DELIVERY_COMPLETE")
             }
 
             fun getDisconnectionReason(mqEx: MqttException): Int {
@@ -218,7 +200,7 @@ class IotCoreClient(
                     MqttException.REASON_CODE_CONNECTION_LOST.toInt() -> {
                         if (mqEx.cause is EOFException) {
                             // This happens when Paho or Cloud IoT Core close the connection
-                            if (mRunBackgroundThread.get()) {
+                            if (runBackgroundThread.get()) {
                                 // If mRunBackground is true, then Cloud Core IoT closed the connection
                                 // Example this cloud happen if the client use an invalid GCP Project
                                 // ID, the client exceeds a rate limit set by Cloud IoT Core or if
@@ -278,15 +260,6 @@ class IotCoreClient(
     }
 
     /**
-     * Set the Mqtt Callbacks
-     */
-    private fun createMqttCallback(
-        onConfigurationExecutor: Executor
-    ) {
-
-    }
-
-    /**
      * Connect to Cloud IoT Core and perform any other required set up.
      *
      * <p>If the client registered a {@link ConnectionCallback},
@@ -298,15 +271,15 @@ class IotCoreClient(
      * <p>This method is non-blocking.
      */
     fun connect() {
-        mRunBackgroundThread.set(true)
-        // !mBackgroundThread.isAlive TODO
+        runBackgroundThread.set(true)
+
         if(mBackgroundThread == null) {
 
             mBackgroundThread = thread(start = true) {
                 Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
 
                 // Run as long as the thread is enable
-                while(mRunBackgroundThread.get()) {
+                while(runBackgroundThread.get()) {
                     reconnectLoop()
                 }
             }
@@ -350,14 +323,14 @@ class IotCoreClient(
             // 2 - Publish device state
             // 3 - Publish telemetry events
             // Check whether the thread should continue running
-            if(!mRunBackgroundThread.get()) {
+            if(!runBackgroundThread.get()) {
                 return
             }
 
             // Check whether there is a device state to send
             if(mUnsentDeviceState != null) {
                 // Sent device state
-                publish(mConnectionParams.deviceStateTopic, mUnsentDeviceState.get(),
+                publish(connectionParams.deviceStateTopic, mUnsentDeviceState.get(),
                     QOS_FOR_DEVICE_STATE_MESSAGES)
                 Log.d(TAG, "Published State $mUnsentDeviceState")
             }
@@ -376,7 +349,7 @@ class IotCoreClient(
         // event already
         if(mUnsentTelemetryEvent == null) {
             synchronized(mQueueLock) {
-                mUnsentTelemetryEvent = mTelemetryQueue.poll()
+                mUnsentTelemetryEvent = telemetryQueue.poll()
             }
 
             if(mUnsentTelemetryEvent == null) {
@@ -389,7 +362,7 @@ class IotCoreClient(
         val unsent = mUnsentTelemetryEvent
         if(unsent != null) {
             publish(
-                mConnectionParams.telemetryTopic + unsent.topicSubpath,
+                connectionParams.telemetryTopic + unsent.topicSubpath,
                 unsent.data,
                 unsent.qos)
             Log.d(TAG, "Published telemetry event ${unsent.data}")
@@ -405,6 +378,8 @@ class IotCoreClient(
     @Throws(MqttException::class)
     private fun publish(topic: String, data: ByteArray, qos: Int) {
         try {
+
+            mqttClient.publish(topic, data, qos, false)
 
         } catch (mqttException: MqttException) {
             // If there was an error publishing the message, it was either because of an issue with
@@ -449,10 +424,10 @@ class IotCoreClient(
                 // This case happens when there is no internet connection. Unfortunately, Paho
                 // doesn't provide a better way to get that information.
                 if (mqttException.cause is UnknownHostException) {
-                    true
+                    return true
                 }
                 // Not Retryable Error
-                false
+                return false
             }
             MqttException.REASON_CODE_CONNECTION_LOST.toInt() -> {
                 // If the MqttException's cause is an EOFException, then the client or Cloud IoT
@@ -460,11 +435,11 @@ class IotCoreClient(
                 // client didn't close the connection and the connection was likely closed because
                 // the client was publishing device state updates too quickly. Mark this as a
                 // "retryable" error so the message that caused the exception isn't discarded.
-                if (mqttException.cause is EOFException && mRunBackgroundThread.get()) {
-                    true
+                if (mqttException.cause is EOFException && runBackgroundThread.get()) {
+                    return true
                 }
                 // Not Retryable Error 
-                false
+                return false
             }
 
             else -> false
@@ -482,7 +457,7 @@ class IotCoreClient(
 
         mqttClient.connect(configureConnectionOptions())
 
-        for (topic in mSubscriptionTopics) {
+        for (topic in subscriptionTopics) {
             mqttClient.subscribe(topic)
         }
         onConnection()
@@ -501,7 +476,7 @@ class IotCoreClient(
         // JWT to authorize the device.
         options.userName = "unused"
         // generate the JWT password
-        options.password = mqttAuthentication.createJwt(mConnectionParams.projectId)
+        options.password = mqttAuthentication.createJwt(connectionParams.projectId)
         return options
     }
 
@@ -509,10 +484,8 @@ class IotCoreClient(
      * Call client's connection callbacks - Connection
      */
     private fun onConnection() {
-        mConnectionCallbackExecutor.execute {
-            if(mClientConnectionState.getAndSet(true)) {
-                mConnectionCallback.onConnected()
-            }
+        if(clientConnectionState.getAndSet(true)) {
+            connectionCallback.onConnected()
         }
     }
 
@@ -520,17 +493,15 @@ class IotCoreClient(
      *  Call client's connection callbacks - Disconnection
      */
     private fun onDisconnect(reason: Int) {
-        mConnectionCallbackExecutor.execute {
-            if(reason == ConnectionCallback.REASON_NOT_AUTHORIZED) {
-                // Always notify on NOT_AUTHORIZED errors since they mean the client is
-                // misconfigured and needs to do something to fix the problem.
-                mClientConnectionState.set(false)
-                mConnectionCallback.onDisconnected(reason)
-            } else if(mClientConnectionState.getAndSet(false)) {
-                // Otherwise, only notify the client if they have not been notified
-                // about the change in connection yet
-                mConnectionCallback.onDisconnected(reason)
-            }
+        if(reason == ConnectionCallback.REASON_NOT_AUTHORIZED) {
+            // Always notify on NOT_AUTHORIZED errors since they mean the client is
+            // misconfigured and needs to do something to fix the problem.
+            clientConnectionState.set(false)
+            connectionCallback.onDisconnected(reason)
+        } else if(clientConnectionState.getAndSet(false)) {
+            // Otherwise, only notify the client if they have not been notified
+            // about the change in connection yet
+            connectionCallback.onDisconnected(reason)
         }
     }
 
@@ -550,7 +521,7 @@ class IotCoreClient(
      *
      */
     fun disconnect() {
-        mRunBackgroundThread.set(false)
+        runBackgroundThread.set(false)
         mSemaphore.release()
     }
 
@@ -567,8 +538,8 @@ class IotCoreClient(
      */
     fun publishTelemetry(event: TelemetryEvent): Boolean {
         synchronized(mQueueLock) {
-            val preOfferSize = mTelemetryQueue.size
-            if(!mTelemetryQueue.offer(event) || mTelemetryQueue.size == preOfferSize) {
+            val preOfferSize = telemetryQueue.size
+            if(!telemetryQueue.offer(event) || telemetryQueue.size == preOfferSize) {
                 // Don't increase number of permits in semaphore because event wasn't added to queue
                 return false
             }

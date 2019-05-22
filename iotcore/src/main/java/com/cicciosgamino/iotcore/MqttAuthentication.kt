@@ -77,7 +77,7 @@ class MqttAuthentication {
     @Throws(GeneralSecurityException::class)
     fun generateAuthenticationKey() {
 
-        val now = DateTime()
+        val now = DateTime.now()
 
         val kpg : KeyPairGenerator = KeyPairGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_RSA, DEFAULT_KEYSTORE
@@ -139,7 +139,7 @@ class MqttAuthentication {
         NoSuchAlgorithmException::class,
         IOException::class)
     fun createJwt(projectId : String) : CharArray {
-        val now = DateTime()
+        val now = DateTime.now()
         /** Create a JWT token to authenticate this device, the device
          * will be disconnected after the token expires, audience field
          * should always be set to the GCP project id

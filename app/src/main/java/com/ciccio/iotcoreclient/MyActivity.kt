@@ -24,9 +24,7 @@ class MyActivity : Activity() {
             "cloud-region"
         )
 
-        iotClient = IotCoreClient(
-            connectionParams,
-        )
+        // iotClient = IotCoreClient()
 
         Log.d(TAG, "@MSG >> ACTIVITY.CREATED")
     }
