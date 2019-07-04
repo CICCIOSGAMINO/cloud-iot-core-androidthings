@@ -45,17 +45,16 @@ class MqttAuthentication {
             keyStore = KeyStore.getInstance(DEFAULT_KEYSTORE)
             keyStore.load(null)
 
-            if (keyStore.getCertificate(KEY_ALIAS) == null) {
-
-                /** Generate Key */
-                Log.d(TAG, "@ DBG >> X509Certificate NOT FOUND (Creating .... ) ")
-
-                generateAuthenticationKey()
-            }
-
             certificate = keyStore.getCertificate(KEY_ALIAS)
 
-            Log.d(TAG, "@DBG >> LOAD Certificate : " + KEY_ALIAS)
+            if (certificate == null) {
+                /** Generate Key */
+                Log.d(TAG, "No X509Certificate FOUND (Creating .... ) ")
+
+                generateAuthenticationKey()
+                certificate = keyStore.getCertificate(KEY_ALIAS)
+            }
+            Log.d(TAG, "Loaded certificate : " + KEY_ALIAS)
 
             val key : Key = keyStore.getKey(KEY_ALIAS, null)
             privateKey = key as PrivateKey
@@ -104,7 +103,7 @@ class MqttAuthentication {
         IOException::class)
     fun exportPublicKey(fileName: String) {
 
-        /** Write the Public Key in the rs256_x509.pub  */
+        /** Write the Public Key in the /key/public.pub  */
         val path = Environment.getExternalStorageDirectory().absolutePath
 
         val file = File(path + File.separator + fileName)

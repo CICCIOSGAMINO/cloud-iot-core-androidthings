@@ -1,6 +1,5 @@
 package com.cicciosgamino.iotcore
 
-import android.os.SystemClock
 import java.lang.IllegalArgumentException
 import kotlin.random.Random
 
@@ -26,7 +25,7 @@ import kotlin.random.Random
 class BoundedExponentialBackoff(
         private val initialBackoffMillis: Long = 1000,
         private val jitterMillis: Long = 1000,
-        private val maxBackoffMillis: Long = 300 * 1000
+        private val maxBackoffMillis: Long = 64 * 1000
 ) {
 
     private val mRandom: Random
@@ -43,7 +42,9 @@ class BoundedExponentialBackoff(
             throw IllegalArgumentException("@EXCEPTION >> Maximum Backoff time must be >= Initial")
 
         mCurrentBackoffDurationMillis = initialBackoffMillis
-        mRandom = Random(SystemClock.currentThreadTimeMillis())
+        // mRandom = Random(SystemClock.currentThreadTimeMillis())
+        // TO DELEte
+        mRandom = Random(7)
     }
 
 

@@ -1,6 +1,6 @@
 package com.cicciosgamino.iotcore
 
-interface ConnectionCallback {
+abstract class ConnectionCallback {
 
     companion object {
         /** Could not determine the source of the error.  */
@@ -19,12 +19,12 @@ interface ConnectionCallback {
     }
 
     /** Invoked when the Cloud IoT Core connection is established.  */
-    fun onConnected()
+    abstract fun onConnected()
 
     /**
      * Invoked when the Cloud IoT Core connection is lost.
      *
      * @param reason the reason the connection was lost
      */
-    fun onDisconnected(reason: Int)
+    abstract fun onDisconnected(reason: Int)
 }

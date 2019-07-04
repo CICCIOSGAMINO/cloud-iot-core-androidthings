@@ -33,23 +33,6 @@ dependencies {
 
     androidTestImplementation 'androidx.test:runner:1.2.0-beta01'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.2.0-beta01'
-    compileOnly 'com.google.android.things:androidthings:1.0'
     implementation"org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
-
-    // Coroutines
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.1.1'
-
-    // MQTT
-    implementation('org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.1') {
-        exclude group: 'com.google.android', module: 'support-v4'
-    }
-    implementation('org.eclipse.paho:org.eclipse.paho.android.service:1.1.1') {
-        exclude group: 'com.google.android', module: 'support-v4'
-    }
-
-    // JWT Handler
-    implementation 'io.jsonwebtoken:jjwt:0.9.1'
-
-    // Jodatime
-    implementation 'joda-time:joda-time:2.10.2'
 }
+
