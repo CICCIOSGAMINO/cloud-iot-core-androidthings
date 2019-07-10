@@ -71,12 +71,13 @@ class IotCoreClient(
     private val onCommandListener: OnCommandListener,
     private val onConfigurationListener: OnConfigurationListener
 ){
-    // Default telemetry queue capacity
-    private val DEFAULT_QUEUE_CAPACITY = 1000
 
+    // Connected Task Loop Delay
+    private val TASKS_LOOP_DELAY = 5_000L
+    // Default telemetry queue capacity
+    private val DEFAULT_QUEUE_CAPACITY = 10000
     // Quality of service level ( 1 = at least one / 0 = at most one )
     private val QOS_FOR_DEVICE_STATE_MESSAGES = 1
-
     // Handle the MQTT Authentication
     private val mqttAuthentication: MqttAuthentication
     // MqttClient
@@ -87,19 +88,17 @@ class IotCoreClient(
     private val backoff: BoundedExponentialBackoff
 
     // Coroutine Connection Loop scope
-    private val loopScope = CoroutineScope(Dispatchers.IO)
+    private val loopJob = Job()
+    private val loopScope = CoroutineScope(Dispatchers.IO + loopJob)
 
     private val mCommandsTopicPrefixRegex = String.format(Locale.US, "^%s/?", connectionParams.commandsTopic)
 
     // Store telemetry events failed to sent
-    private var mUnsentTelemetryEvent: TelemetryEvent? = null
+    private var unsentTelemetryEvent: TelemetryEvent? = null
     // Store telemetry events failed to sent
-    private val unsentState: AtomicReference<ByteArray?> = AtomicReference(null)
+    private var unsentState: AtomicReference<String> = AtomicReference("")
 
-    private lateinit var telemetryQueue: Queue<TelemetryEvent>
-
-    // Queue of unsent telemetry events.
-    private val mQueueLock = Any()
+    private var telemetryQueue: Queue<TelemetryEvent>
 
     init {
 
@@ -140,6 +139,8 @@ class IotCoreClient(
             //   2. If there's an exception when sending unsent messages stored in the
             //      MemoryPersistence object. This should never happen because we make a new
             //      MemoryPersistence instance every time we call the MqttClient constructor.
+            Log.d(TAG, "@EXCEPTION >> Init MQTT : $e")
+
             throw IllegalStateException(e)
 
         }
@@ -177,7 +178,7 @@ class IotCoreClient(
             }
 
             override fun deliveryComplete(token: IMqttDeliveryToken?) {
-                Log.d(TAG , "@MSG >> DELIVERY_COMPLETE")
+                Log.d(TAG , "@MSG >> Delivery COMPLETE : $token")
             }
 
             fun getDisconnectionReason(mqEx: MqttException): Int {
@@ -237,11 +238,8 @@ class IotCoreClient(
                     else -> ConnectionCallback.REASON_UNKNOWN
 
                 }
-
             }
-
         })
-
     }  // End Init
 
 
@@ -257,59 +255,54 @@ class IotCoreClient(
      * <p>This method is non-blocking.
      */
     fun connect() {
-        reconnectLoop()
+
+        if (!isConnected()) {
+            reconnectLoop()
+        }
     }
 
     /**
      * Handle the re-connection Loop, Backoff time, Connected Task
      */
     private fun reconnectLoop() {
-        Log.d(TAG, "@MSG >> CLIENT RECONNECT LOOP")
 
         // Loop Coroutine Scope - Keep track from Loop Coroutine
         loopScope.launch {
 
-            while(true) {
-                // INFINITE LOOP
+            // Explicitly check the cancellation status
+            while(isActive) {
 
-                try {
+                // INFINITE LOOP - Connect MQTT - doConnected Task
+                while(true) {
 
-                    connectMqttClient()
+                    try {
 
-                    // Successfully connected, so we can reset the backoff time
-                    backoff.reset()
+                        connectMqttClient()
 
-                    // Perform Task that require a connection
-                    doConnectedTask()
+                        // Successfully connected, so we can reset the backoff time
+                        backoff.reset()
 
-                } catch (mqttException: MqttException) {
+                        // Perform Task that require a connection
+                        doConnectedTask()
 
-
-                    if(isRetryableError(mqttException)) {
-                        // If retryable Sleep and retry
-                        val sleepTime = backoff.nextBackoff()
-                        Log.d(TAG, "@DBG >> RETRYABLE(SLEEP) : $sleepTime ")
-
+                    } catch (mqttException: MqttException) {
                         // Update backoff waiting time
-                        delay(sleepTime)
-                    }
+                        if(isRetryableError(mqttException)) delay(backoff.nextBackoff())
 
+                    }
                 }
 
-            }
-
+            } // End isActive
         }
     }
 
     /**
-     *
+     * Handle the task to do when connected to MQTT Pub/Sub
      */
     @Throws(MqttException::class)
     suspend fun doConnectedTask() {
 
         while(isConnected()) {
-
-            Log.d(TAG, "@DBG >> ConnectedTask (CONNECTED)")
 
             // Handle Device State
             handleState()
@@ -317,9 +310,7 @@ class IotCoreClient(
             // Handle Telemetry
             handleTelemetry()
 
-            delay(5_000)
-
-            publishDeviceState("connected:ok".toByteArray())
+            delay(TASKS_LOOP_DELAY)
         }
     }
 
@@ -329,15 +320,13 @@ class IotCoreClient(
     @Throws(MqttException::class)
     private fun handleState() {
 
-        Log.d(TAG, "@DBG >> unsentState : ${unsentState.get()}")
-        Log.d(TAG, "@DBG >> unsentState != null : ${unsentState.get() != null}")
+        val temp = unsentState?.get() ?: ""
 
-        if(unsentState?.get() != null) {
+        if(temp.isNotEmpty()) {
             // Sent device state
-            publish(connectionParams.deviceStateTopic, "${unsentState.get()}".toByteArray(),
+            publish(connectionParams.deviceStateTopic, temp.toByteArray(),
                 QOS_FOR_DEVICE_STATE_MESSAGES)
-            Log.d(TAG, "@MSG >> Published STATE ${unsentState.get()}")
-            unsentState.set(null)
+            unsentState.set("")
         }
 
     }
@@ -348,29 +337,32 @@ class IotCoreClient(
     @Throws(MqttException::class)
     private fun handleTelemetry() {
         // Only send events from the client's telemetry queue
-        if(mUnsentTelemetryEvent == null) {
-            synchronized(mQueueLock) {
-                mUnsentTelemetryEvent = telemetryQueue?.poll()
-            }
+        if(unsentTelemetryEvent == null) {
 
-            if(mUnsentTelemetryEvent == null) {
-                // Queue is empty nothing to do
+            // Remove and return the head of the queue
+            unsentTelemetryEvent = telemetryQueue.poll()
+
+
+            if(unsentTelemetryEvent == null) {
+                // Queue is empty do nothing
                 return
             }
         }
 
         // send the event
-        val unsent = mUnsentTelemetryEvent
+        val unsent = unsentTelemetryEvent
         if(unsent != null) {
             publish(
                 connectionParams.telemetryTopic + unsent.topicSubpath,
                 unsent.data,
                 unsent.qos)
-            Log.d(TAG, "Published telemetry event ${unsent.data}")
+
+            // TODO - Debug Telemetry Event Sent
+            Log.d(TAG, "@DBG >> Published Telemetry Event : ${unsent.data}")
         }
 
         // Event sent successfully. Clear the cached event.
-        mUnsentTelemetryEvent = null
+        unsentTelemetryEvent = null
     }
 
     /**
@@ -416,9 +408,9 @@ class IotCoreClient(
 
         Log.d(TAG, "@DBG >> RetryableError .. ${mqttException}")
 
-        /**
-        // Retry using exponential backoff in cases where appropriate. Otherwise, log the failure
-        return when(mqttException.reasonCode){
+
+        return when(mqttException.reasonCode) {
+
             MqttException.REASON_CODE_SERVER_CONNECT_ERROR.toInt(),
                 MqttException.REASON_CODE_WRITE_TIMEOUT.toInt(),
                 MqttException.REASON_CODE_CLIENT_NOT_CONNECTED.toInt(),
@@ -429,13 +421,12 @@ class IotCoreClient(
                 if (mqttException.cause is UnknownHostException) {
                     return true
                 }
-                // Not Retryable Error
+                // Not Retriable Error
                 return false
             }
             MqttException.REASON_CODE_CONNECTION_LOST.toInt() -> {
                 // If the MqttException's cause is an EOFException, then the client or Cloud IoT
-                // Core closed the connection. If mRunBackgroundThread is true, then we know the
-                // client didn't close the connection and the connection was likely closed because
+                // Core closed the connection, the connection was likely closed because
                 // the client was publishing device state updates too quickly. Mark this as a
                 // "retryable" error so the message that caused the exception isn't discarded.
                 if (mqttException.cause is EOFException) {
@@ -444,20 +435,17 @@ class IotCoreClient(
                 // Not Retryable Error 
                 return false
             }
-
+            // Not Retryable Error
             else -> false
-        } */
-
-        return true
+        }
     }
 
     /**
-     * Connect to Mqtt Client (Blocking Operation)
+     * Connect to Mqtt Client
      */
     @Throws(MqttException::class)
     private fun connectMqttClient() {
 
-        Log.d(TAG, "@DBG >> Connect to MQTT Client ")
         if (mqttClient.isConnected) {
             return
         }
@@ -465,8 +453,13 @@ class IotCoreClient(
         mqttClient.connect(configureConnectionOptions())
 
         for (topic in subscriptionTopics) {
+
+            // TODO Handle the topics
+            // Log.d(TAG, "@DBG >> Topics $topic")
+
             mqttClient.subscribe(topic)
         }
+
         onConnection()
     }
 
@@ -500,16 +493,8 @@ class IotCoreClient(
      *  Call client's connection callbacks - Disconnection
      */
     private fun onDisconnect(reason: Int) {
-        if(reason == ConnectionCallback.REASON_NOT_AUTHORIZED) {
-            // Always notify on NOT_AUTHORIZED errors since they mean the client is
-            // misconfigured and needs to do something to fix the problem.
             clientConnectionState.set(false)
             connectionCallback.onDisconnected(reason)
-        } else if(clientConnectionState.getAndSet(false)) {
-            // Otherwise, only notify the client if they have not been notified
-            // about the change in connection yet
-            connectionCallback.onDisconnected(reason)
-        }
     }
 
     /**
@@ -522,13 +507,15 @@ class IotCoreClient(
     }
 
     /**
-     * Disconnect the client from Cloud IoT Core.
-     *
-     * <p>This method is non-blocking.
+     * Disconnect the client from Cloud IoT Core. Close the MQTT Connection
+     * and cancel the Coroutine
      *
      */
     fun disconnect() {
-
+        // Close MQTT Connection
+        mqttClient.close()
+        // Close Coroutine Job
+        loopJob.cancel()
     }
 
     /**
@@ -545,12 +532,16 @@ class IotCoreClient(
     fun publishTelemetry(event: TelemetryEvent): Boolean {
 
         val preOfferSize = telemetryQueue.size
-        if(telemetryQueue.offer(event) || telemetryQueue.size == preOfferSize) {
+        if(!telemetryQueue.offer(event) || telemetryQueue.size == preOfferSize) {
 
             return false
         }
 
-        // TODO Sent message
+        // Event added to the Queue go on with Loop
+
+        // TODO - Debug on Telemetry
+        Log.d(TAG, "@DBG >> Telemetry add to Queue[size:${telemetryQueue.size}] ")
+
         return true
 
     }
@@ -577,9 +568,12 @@ class IotCoreClient(
      *
      * @param state the device state data to publish
      */
-    fun publishDeviceState(state: ByteArray) {
-        unsentState.set(state)
+    fun publishDeviceState(state: String) {
+
+        // TODO - Debug on Device status
         Log.d(TAG, "@DBG >> Publish Device STATE")
+
+        unsentState.set(state)
     }
 
 
