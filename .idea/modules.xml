@@ -2,10 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/app/app.iml" filepath="$PROJECT_DIR$/app/app.iml" />
       <module fileurl="file://$PROJECT_DIR$/cloud-iot-core-androidthings.iml" filepath="$PROJECT_DIR$/cloud-iot-core-androidthings.iml" />
-      <module fileurl="file://$PROJECT_DIR$/firecore/firecore.iml" filepath="$PROJECT_DIR$/firecore/firecore.iml" />
-      <module fileurl="file://$PROJECT_DIR$/fireiot/fireiot.iml" filepath="$PROJECT_DIR$/fireiot/fireiot.iml" />
       <module fileurl="file://$PROJECT_DIR$/iotcore/iotcore.iml" filepath="$PROJECT_DIR$/iotcore/iotcore.iml" />
     </modules>
   </component>

@@ -1,1 +1,1 @@
-include ':app', ':iotcore', ':firecore', ':fireiot'
+include ':iotcore'

@@ -3,11 +3,11 @@ apply plugin: 'kotlin-android'
 apply plugin: 'kotlin-android-extensions'
 
 android {
-    compileSdkVersion rootProject.ext.compileSdkVersion
+    compileSdkVersion 28
 
     defaultConfig {
-        minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
+        minSdkVersion 27
+        targetSdkVersion 28
 
         versionCode 1
         versionName "1.0"
@@ -53,3 +53,5 @@ dependencies {
     // Jodatime
     implementation 'joda-time:joda-time:2.10.2'
 }
+
+// apply from: 'publish.gradle'
