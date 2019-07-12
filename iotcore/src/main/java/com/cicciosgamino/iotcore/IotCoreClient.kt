@@ -256,7 +256,6 @@ class IotCoreClient(
      *
      * <p>This method is non-blocking.
      */
-    @Throws(MqttException::class)
     fun connect() {
 
         if (!isConnected()) {
@@ -281,6 +280,9 @@ class IotCoreClient(
 
                     try {
 
+                        // Wait in the Reconnect Loop 
+                        delay(backoff.nextBackoff())
+
                         connectMqttClient()
 
                         // Successfully connected, so we can reset the backoff time
@@ -292,9 +294,11 @@ class IotCoreClient(
                     } catch (mqttException: MqttException) {
                         // Update backoff waiting time
                         if(isRetryableError(mqttException)) {
+                            Log.d(TAG, "@MQTT_EXC >> LOOP_IF ${mqttException}")
                             // Retryable Error, wait next backoff and retry
                             delay(backoff.nextBackoff())
                         } else {
+                            Log.d(TAG, "@MQTT_EXC >> LOOP_ELSE ${mqttException}")
                             // NOT Retryable Error
                             throw mqttException
 
