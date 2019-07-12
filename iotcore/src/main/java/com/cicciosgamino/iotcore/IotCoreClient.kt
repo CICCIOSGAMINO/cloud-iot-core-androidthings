@@ -290,7 +290,7 @@ class IotCoreClient(
 
                     } catch (mqttException: MqttException) {
                         // Just Log
-                        Log.d(TAG, "@MQTT_EXCEPTION RETRYABLE(${isRetryableError(mqttException)}) >> : ${mqttException.message}")
+                        Log.d(TAG, "@MQTT_EXCEPTION RETRYABLE(${isRetryableError(mqttException)}) >> CODE:${mqttException.reasonCode}  CAUSE:${mqttException.cause}   STRING:${mqttException}")
                         // Wait in the Reconnect Loop
                         delay(backoff.nextBackoff())
                     }
