@@ -256,6 +256,7 @@ class IotCoreClient(
      *
      * <p>This method is non-blocking.
      */
+    @Throws(MqttException::class)
     fun connect() {
 
         if (!isConnected()) {
@@ -266,12 +267,13 @@ class IotCoreClient(
     /**
      * Handle the re-connection Loop, Backoff time, Connected Task
      */
+    @Throws(MqttException::class)
     private fun reconnectLoop() {
 
         // Loop Coroutine Scope - Keep track from Loop Coroutine
         loopScope.launch {
 
-            // Explicitly check the cancellation status
+            // Explicitly check the cancellation status of Coroutine
             while(isActive) {
 
                 // INFINITE LOOP - Connect MQTT - doConnected Task
@@ -289,7 +291,14 @@ class IotCoreClient(
 
                     } catch (mqttException: MqttException) {
                         // Update backoff waiting time
-                        if(isRetryableError(mqttException)) delay(backoff.nextBackoff())
+                        if(isRetryableError(mqttException)) {
+                            // Retryable Error, wait next backoff and retry
+                            delay(backoff.nextBackoff())
+                        } else {
+                            // NOT Retryable Error
+                            throw mqttException
+
+                        }
 
                     }
                 }
@@ -306,19 +315,14 @@ class IotCoreClient(
 
         while(isConnected()) {
 
-            try {
+            // Handle Device State
+            handleState()
 
-                // Handle Device State
-                handleState()
+            // Handle Telemetry
+            handleTelemetry()
 
-                // Handle Telemetry
-                handleTelemetry()
+            delay(TASKS_LOOP_DELAY)
 
-                delay(TASKS_LOOP_DELAY)
-
-            } catch(mqttEx: MqttException) {
-                Log.d(TAG, "@MQTT_EXCEPTION >> doConnectedTask LOOP : ${mqttEx.message}")
-            }
         }
     }
 
