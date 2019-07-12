@@ -183,6 +183,8 @@ class IotCoreClient(
 
             fun getDisconnectionReason(mqEx: MqttException): Int {
 
+                Log.d(TAG, "@DBG >> Disconnection Reason ${mqEx.message}")
+
                 return when(mqEx.reasonCode){
                     MqttException.REASON_CODE_FAILED_AUTHENTICATION.toInt(),
                         MqttException.REASON_CODE_NOT_AUTHORIZED.toInt()
@@ -304,13 +306,19 @@ class IotCoreClient(
 
         while(isConnected()) {
 
-            // Handle Device State
-            handleState()
+            try {
 
-            // Handle Telemetry
-            handleTelemetry()
+                // Handle Device State
+                handleState()
 
-            delay(TASKS_LOOP_DELAY)
+                // Handle Telemetry
+                handleTelemetry()
+
+                delay(TASKS_LOOP_DELAY)
+
+            } catch(mqttEx: MqttException) {
+                Log.d(TAG, "@MQTT_EXCEPTION >> doConnectedTask LOOP : ${mqttEx.message}")
+            }
         }
     }
 
@@ -385,8 +393,7 @@ class IotCoreClient(
             // If the message itself was the problem, don't propagate the error since there's
             // nothing we can do about it except log the error to the client.
             if(isRetryableError(mqttException)) {
-                
-                Log.d(TAG, "@DBG >> ${mqttException}")
+
                 throw mqttException
             }
 
@@ -406,7 +413,7 @@ class IotCoreClient(
      */
     private fun isRetryableError(mqttException: MqttException): Boolean {
 
-        Log.d(TAG, "@DBG >> RetryableError .. ${mqttException}")
+        Log.d(TAG, "@DBG >> RetryableError .. ${mqttException.message}")
 
 
         return when(mqttException.reasonCode) {
@@ -440,11 +447,14 @@ class IotCoreClient(
         }
     }
 
+
     /**
      * Connect to Mqtt Client
      */
     @Throws(MqttException::class)
     private fun connectMqttClient() {
+
+        Log.d(TAG, "@DBG >> TRY To Connect to MQTT ")
 
         if (mqttClient.isConnected) {
             return
