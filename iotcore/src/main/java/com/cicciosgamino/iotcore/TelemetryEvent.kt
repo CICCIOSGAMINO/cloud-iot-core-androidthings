@@ -26,7 +26,8 @@ class TelemetryEvent(
 
     init {
         if(qos != QOS_AT_LEAST_ONCE && qos != QOS_AT_MOST_ONCE) {
-            throw IllegalArgumentException("Invalid quality of service QoS provided")
+            throw IllegalArgumentException("" +
+                    "@EXCEPTION TELEMETRY >> Invalid quality of service QoS provided")
         }
     }
 }

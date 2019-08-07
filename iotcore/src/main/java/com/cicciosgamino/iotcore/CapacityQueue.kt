@@ -31,12 +31,14 @@ internal class CapacityQueue<E>(
 
     init {
         if(maxCapacity <= 0) {
-            throw IllegalArgumentException("Queue capacity must be greater than 0")
+            throw IllegalArgumentException(
+                "@EXCEPION QUEUE >> Queue capacity must be greater than 0")
         }
         if(dropPolicy != DROP_POLICY_HEAD &&
                 dropPolicy != DROP_POLICY_TAIL
         ) {
-            throw IllegalArgumentException("Queue drop policy must be DROP_POLICY_HEAD or DROP_POLICY_TAIL")
+            throw IllegalArgumentException("" +
+                    "@EXCEPION QUEUE >> Queue drop policy must be DROP_POLICY_HEAD or DROP_POLICY_TAIL")
         }
 
         dqeque = ArrayDeque()

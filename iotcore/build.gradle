@@ -22,6 +22,9 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+    lintOptions {
+        disable('AllowBackup', 'GoogleAppIndexingWarning', 'MissingApplicationIcon')
+    }
 
 }
 
@@ -54,4 +57,3 @@ dependencies {
     implementation 'joda-time:joda-time:2.10.2'
 }
 
-// apply from: 'publish.gradle'

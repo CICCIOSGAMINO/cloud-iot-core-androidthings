@@ -48,14 +48,14 @@ class MqttAuthentication {
             if (keyStore.getCertificate(KEY_ALIAS) == null) {
 
                 /** Generate Key */
-                Log.d(TAG, "@ DBG >> X509Certificate NOT FOUND (Creating .... ) ")
+                Log.d(TAG, "@MSG MQTT_AUTH >> X509Certificate NOT FOUND (Creating .... ) ")
 
                 generateAuthenticationKey()
             }
 
             certificate = keyStore.getCertificate(KEY_ALIAS)
 
-            Log.d(TAG, "@DBG >> LOAD Certificate : " + KEY_ALIAS)
+            Log.d(TAG, "@MSG MQTT_AUTH >> LOAD Certificate : " + KEY_ALIAS)
 
             val key : Key = keyStore.getKey(KEY_ALIAS, null)
             privateKey = key as PrivateKey
@@ -63,9 +63,9 @@ class MqttAuthentication {
             exportPublicKey(FILE_PUB_KEY)
 
         } catch (generalSecurityException: GeneralSecurityException) {
-            Log.w(TAG, "@SECURITY_EXCEPTION >> $generalSecurityException")
+            Log.w(TAG, "@SECURITY_EXCEPTION MQTT_AUTH >> $generalSecurityException")
         } catch (ioExceptions: IOException) {
-            Log.w(TAG, "@IOEXCEPTION >> $ioExceptions" )
+            Log.w(TAG, "@IOEXCEPTION MQTT_AUTH >> $ioExceptions" )
         }
     }
 
@@ -115,7 +115,7 @@ class MqttAuthentication {
             fos.flush()
             fos.close()
         } catch (fex : FileNotFoundException) {
-            Log.e(TAG, " @EXCEPTION >> ", fex)
+            Log.e(TAG, " @EXCEPTION MQTT_AUTH >> ", fex)
         }
     }
 

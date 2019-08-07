@@ -18,6 +18,7 @@ class ConnectionParams(
         val registryId : String,   // Cloud IoT Registry name
         val deviceId : String,     // Cloud IoT Device Id
         val cloudRegion : String,  // GCP Cloud Region
+        val topic: String,         // GCP Topic
         val authTokenLifetime: Long = DEFAULT_AUTH_TOKEN_LIFETIME_MILLIS// Auth Token Lifetime in Mills
 ) {
 

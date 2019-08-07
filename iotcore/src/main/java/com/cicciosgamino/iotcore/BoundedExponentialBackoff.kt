@@ -26,7 +26,7 @@ import kotlin.random.Random
 class BoundedExponentialBackoff(
         private val initialBackoffMillis: Long = 1000,
         private val jitterMillis: Long = 1000,
-        private val maxBackoffMillis: Long = 300 * 1000
+        private val maxBackoffMillis: Long = 600 * 1000
 ) {
 
     private val mRandom: Random
@@ -34,13 +34,17 @@ class BoundedExponentialBackoff(
 
     init {
         if(initialBackoffMillis <= 0)
-            throw  IllegalArgumentException("@EXCEPION >> Initial Backoff time must be > 0")
+            throw  IllegalArgumentException(
+                "@EXCEPION BACKOFF >> Initial Backoff time must be > 0")
         if(maxBackoffMillis <= 0)
-            throw  IllegalArgumentException("@EXCEPION >> Maximum Backoff time must be > 0")
+            throw  IllegalArgumentException(
+                "@EXCEPION BACKOFF >> Maximum Backoff time must be > 0")
         if(jitterMillis < 0)
-            throw  IllegalArgumentException("@EXCEPION >> Jitter Backoff time must be >= 0")
+            throw  IllegalArgumentException(
+                "@EXCEPION BACKOFF >> Jitter Backoff time must be >= 0")
         if(maxBackoffMillis < initialBackoffMillis)
-            throw IllegalArgumentException("@EXCEPTION >> Maximum Backoff time must be >= Initial")
+            throw IllegalArgumentException(
+                "@EXCEPTION BACKOFF >> Maximum Backoff time must be >= Initial")
 
         mCurrentBackoffDurationMillis = initialBackoffMillis
         mRandom = Random(SystemClock.currentThreadTimeMillis())

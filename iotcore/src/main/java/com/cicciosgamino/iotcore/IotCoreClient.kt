@@ -105,6 +105,7 @@ class IotCoreClient(
         // Init Mqtt authentication, Signed JWT to authenticate on Cloud IoT Core
         mqttAuthentication = MqttAuthentication()
 
+
         // Init the Telemetry Queue
         telemetryQueue = CapacityQueue<TelemetryEvent>(
             DEFAULT_QUEUE_CAPACITY,
@@ -139,9 +140,7 @@ class IotCoreClient(
             //   2. If there's an exception when sending unsent messages stored in the
             //      MemoryPersistence object. This should never happen because we make a new
             //      MemoryPersistence instance every time we call the MqttClient constructor.
-            Log.d(TAG, "@EXCEPTION >> Init MQTT : $e")
-
-            throw IllegalStateException(e)
+            throw IllegalStateException("@EXCEPTION INIT_MQTT >> $e")
 
         }
 
@@ -179,67 +178,6 @@ class IotCoreClient(
 
             override fun deliveryComplete(token: IMqttDeliveryToken?) {
                 Log.d(TAG , "@MSG >> Delivery COMPLETE : $token")
-            }
-
-            fun getDisconnectionReason(mqEx: MqttException): Int {
-
-                Log.d(TAG, "@DBG >> Disconnection Reason ${mqEx.message}")
-
-                return when(mqEx.reasonCode){
-                    MqttException.REASON_CODE_FAILED_AUTHENTICATION.toInt(),
-                        MqttException.REASON_CODE_NOT_AUTHORIZED.toInt()
-                        // These cases happen if client use an invalid :
-                        // + IoT Core Registry ID
-                        // + IoT Core Device ID
-                        // + Cloud GCP Region
-                        // + Unregistred Signed Key
-                            -> ConnectionCallback.REASON_NOT_AUTHORIZED
-
-                    MqttException.REASON_CODE_CONNECTION_LOST.toInt() -> {
-                        if (mqEx.cause is EOFException) {
-                            // This happens when Paho or Cloud IoT Core close the connection
-
-                            // If mRunBackground is true, then Cloud Core IoT closed the connection
-                            // Example this cloud happen if the client use an invalid GCP Project
-                            // ID, the client exceeds a rate limit set by Cloud IoT Core or if
-                            // the MQTT Broker address is invalid
-                            return ConnectionCallback.REASON_CONNECTION_LOST
-                            // If mRunBackground is false, then the client closed the connection
-                            // return ConnectionCallback.REASON_CLIENT_CLOSED
-                        }
-
-                        if (mqEx.cause is SSLException) {
-                            // This case happens when something goes wrong in the network that
-                            // ends an existing connection to Cloud IoT Core (e.g wifi driver resets)
-                            return ConnectionCallback.REASON_CONNECTION_LOST
-                        }
-                        return ConnectionCallback.REASON_UNKNOWN
-                    }
-
-                    MqttException.REASON_CODE_CLIENT_EXCEPTION.toInt() -> {
-                        // Paho use this reason code for several distinct error cases
-                        if(mqEx.cause is SocketTimeoutException) {
-                            // This case could happen if MQTT bridge port number is wrong or
-                            // there is some other error with the MQTT Bridge that keeps it from responding
-                            return ConnectionCallback.REASON_CONNECTION_TIMEOUT
-                        }
-
-                        if(mqEx.cause is UnknownHostException) {
-                            // This can happens if the client is disconnected from the Internet or if they
-                            // use an invalid hostname for the MQTT bridge. Paho doesn't provide a way
-                            // to get more information
-                            return ConnectionCallback.REASON_CONNECTION_LOST
-                        }
-                        return ConnectionCallback.REASON_UNKNOWN
-                    }
-
-                    MqttException.REASON_CODE_CLIENT_TIMEOUT.toInt(),
-                        MqttException.REASON_CODE_WRITE_TIMEOUT.toInt() ->
-                            return ConnectionCallback.REASON_CONNECTION_TIMEOUT
-
-                    else -> ConnectionCallback.REASON_UNKNOWN
-
-                }
             }
         })
     }  // End Init
@@ -289,10 +227,17 @@ class IotCoreClient(
                         doConnectedTask()
 
                     } catch (mqttException: MqttException) {
-                        // Just Log
-                        Log.d(TAG, "@MQTT_EXCEPTION RETRYABLE(${isRetryableError(mqttException)}) >> CODE:${mqttException.reasonCode}  CAUSE:${mqttException.cause}   STRING:${mqttException}")
-                        // Wait in the Reconnect Loop
-                        delay(backoff.nextBackoff())
+                        if(isRetryableError(mqttException)) {
+                            // Ok lets retry to connect
+                            Log.d(TAG, "@MQTT_EXCEPTION RETRYABLE(${isRetryableError(mqttException)}) >> CODE:${mqttException.reasonCode}  CAUSE:${mqttException.cause}")
+                            // Wait in the Reconnect Loop
+                            delay(backoff.nextBackoff())
+                        } else {
+                            // Error isn't recoverable. I.e. the error has to do with the way the client is
+                            // configured. Stop the thread to avoid spamming GCP
+                            loopJob.cancelAndJoin()
+                            onDisconnect(getDisconnectionReason(mqttException))
+                        }
                     }
                 }
 
@@ -397,6 +342,72 @@ class IotCoreClient(
             // Return success and don't try to resend the message that caused the exception. Log
             // the error so the user has some indication that something went wrong.
             Log.w(TAG, "Error publishing message to ${topic} >> @EXCEPTION $mqttException")
+        }
+    }
+
+    /**
+     * Return the disconnection reason,
+     * @param mqEx mqtt exception to get the reason from
+     * @return Returns on of the ConnectionCallback reason
+     */
+    fun getDisconnectionReason(mqEx: MqttException): Int {
+
+        Log.d(TAG, "@DBG >> Disconnection Reason ${mqEx.message}")
+
+        return when(mqEx.reasonCode){
+            MqttException.REASON_CODE_FAILED_AUTHENTICATION.toInt(),
+            MqttException.REASON_CODE_NOT_AUTHORIZED.toInt()
+                // These cases happen if client use an invalid :
+                // + IoT Core Registry ID
+                // + IoT Core Device ID
+                // + Cloud GCP Region
+                // + Unregistred Signed Key
+            -> ConnectionCallback.REASON_NOT_AUTHORIZED
+
+            MqttException.REASON_CODE_CONNECTION_LOST.toInt() -> {
+                if (mqEx.cause is EOFException) {
+                    // This happens when Paho or Cloud IoT Core close the connection
+
+                    // If mRunBackground is true, then Cloud Core IoT closed the connection
+                    // Example this cloud happen if the client use an invalid GCP Project
+                    // ID, the client exceeds a rate limit set by Cloud IoT Core or if
+                    // the MQTT Broker address is invalid
+                    return ConnectionCallback.REASON_CONNECTION_LOST
+                    // If mRunBackground is false, then the client closed the connection
+                    // return ConnectionCallback.REASON_CLIENT_CLOSED
+                }
+
+                if (mqEx.cause is SSLException) {
+                    // This case happens when something goes wrong in the network that
+                    // ends an existing connection to Cloud IoT Core (e.g wifi driver resets)
+                    return ConnectionCallback.REASON_CONNECTION_LOST
+                }
+                return ConnectionCallback.REASON_UNKNOWN
+            }
+
+            MqttException.REASON_CODE_CLIENT_EXCEPTION.toInt() -> {
+                // Paho use this reason code for several distinct error cases
+                if(mqEx.cause is SocketTimeoutException) {
+                    // This case could happen if MQTT bridge port number is wrong or
+                    // there is some other error with the MQTT Bridge that keeps it from responding
+                    return ConnectionCallback.REASON_CONNECTION_TIMEOUT
+                }
+
+                if(mqEx.cause is UnknownHostException) {
+                    // This can happens if the client is disconnected from the Internet or if they
+                    // use an invalid hostname for the MQTT bridge. Paho doesn't provide a way
+                    // to get more information
+                    return ConnectionCallback.REASON_CONNECTION_LOST
+                }
+                return ConnectionCallback.REASON_UNKNOWN
+            }
+
+            MqttException.REASON_CODE_CLIENT_TIMEOUT.toInt(),
+            MqttException.REASON_CODE_WRITE_TIMEOUT.toInt() ->
+                return ConnectionCallback.REASON_CONNECTION_TIMEOUT
+
+            else -> ConnectionCallback.REASON_UNKNOWN
+
         }
     }
 
