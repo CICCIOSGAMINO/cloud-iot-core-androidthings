@@ -89,7 +89,8 @@ class IotCoreClient(
 
     // Coroutine Connection Loop scope
     private val loopJob = Job()
-    private val loopScope = CoroutineScope(Dispatchers.IO + loopJob)
+    // private val loopScope = CoroutineScope(Dispatchers.Default + loopJob)
+    private val loopScope = CoroutineScope(Dispatchers.Default)
 
     private val mCommandsTopicPrefixRegex = String.format(Locale.US, "^%s/?", connectionParams.commandsTopic)
 
