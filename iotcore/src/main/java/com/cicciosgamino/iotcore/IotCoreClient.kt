@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.SSLException
 import org.eclipse.paho.client.mqttv3.MqttException
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.CoroutineContext
 
 
 /**
@@ -64,13 +65,19 @@ import java.util.concurrent.atomic.AtomicReference
 
 private val TAG = IotCoreClient::class.java.simpleName
 
-class IotCoreClient(
+class IotCoreClient (
     private val connectionCallback: ConnectionCallback,
     private val connectionParams: ConnectionParams,
     private val subscriptionTopics: List<String> = listOf<String>(),
     private val onCommandListener: OnCommandListener,
     private val onConfigurationListener: OnConfigurationListener
-){
+): CoroutineScope {
+
+    // Coroutine Connection Loop scope
+    private val loopJob = Job()
+
+    override val coroutineContext: CoroutineContext
+        get() = loopJob + Dispatchers.Main
 
     // Connected Task Loop Delay
     private val TASKS_LOOP_DELAY = 5_000L
@@ -86,11 +93,6 @@ class IotCoreClient(
     private val clientConnectionState = AtomicBoolean(false)
     // BoundedExponentialBackoff (handle the re-connecting backoff)
     private val backoff: BoundedExponentialBackoff
-
-    // Coroutine Connection Loop scope
-    private val loopJob = Job()
-    // private val loopScope = CoroutineScope(Dispatchers.Default + loopJob)
-    private val loopScope = CoroutineScope(Dispatchers.Default)
 
     private val mCommandsTopicPrefixRegex = String.format(Locale.US, "^%s/?", connectionParams.commandsTopic)
 
@@ -209,7 +211,7 @@ class IotCoreClient(
     private fun reconnectLoop() {
 
         // Loop Coroutine Scope - Keep track from Loop Coroutine
-        loopScope.launch {
+        launch(coroutineContext) {
 
             // Explicitly check the cancellation status of Coroutine
             while(isActive) {
