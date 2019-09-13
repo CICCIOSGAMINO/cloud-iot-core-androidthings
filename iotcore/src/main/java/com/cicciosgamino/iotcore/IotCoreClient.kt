@@ -12,8 +12,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.SSLException
 import org.eclipse.paho.client.mqttv3.MqttException
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.coroutines.CoroutineContext
-
 
 /**
  * IotCoreClient manages interactions with Google Cloud IoT Core for a single device.
@@ -71,16 +69,10 @@ class IotCoreClient (
     private val subscriptionTopics: List<String> = listOf<String>(),
     private val onCommandListener: OnCommandListener,
     private val onConfigurationListener: OnConfigurationListener
-): CoroutineScope {
-
-    // Coroutine Connection Loop scope
-    private val loopJob = Job()
-
-    override val coroutineContext: CoroutineContext
-        get() = loopJob + Dispatchers.Main
+) {
 
     // Connected Task Loop Delay
-    private val TASKS_LOOP_DELAY = 5_000L
+    private val TASKS_LOOP_DELAY = 10_000L
     // Default telemetry queue capacity
     private val DEFAULT_QUEUE_CAPACITY = 10000
     // Quality of service level ( 1 = at least one / 0 = at most one )
@@ -211,41 +203,39 @@ class IotCoreClient (
     private fun reconnectLoop() {
 
         // Loop Coroutine Scope - Keep track from Loop Coroutine
-        launch(coroutineContext) {
+        GlobalScope.launch {
 
-            // Explicitly check the cancellation status of Coroutine
-            while(isActive) {
+            // INFINITE LOOP - Connect MQTT - doConnected Task
+            while(true) {
 
-                // INFINITE LOOP - Connect MQTT - doConnected Task
-                while(true) {
+                // Wait in the Reconnect Loop
+                delay(backoff.nextBackoff())
 
-                    try {
+                try {
 
-                        connectMqttClient()
+                    connectMqttClient()
 
-                        // Successfully connected, so we can reset the backoff time
-                        backoff.reset()
+                    // Successfully connected, so we can reset the backoff time
+                    backoff.reset()
 
-                        // Perform Task that require a connection
-                        doConnectedTask()
+                    // Perform Task that require a connection
+                    doConnectedTask()
 
-                    } catch (mqttException: MqttException) {
-                        if(isRetryableError(mqttException)) {
-                            // Ok lets retry to connect
-                            Log.d(TAG, "@MQTT_EXCEPTION RETRYABLE(${isRetryableError(mqttException)}) >> CODE:${mqttException.reasonCode}  CAUSE:${mqttException.cause}")
-                            // Wait in the Reconnect Loop
-                            delay(backoff.nextBackoff())
-                        } else {
-                            // Error isn't recoverable. I.e. the error has to do with the way the client is
-                            // configured. Stop the thread to avoid spamming GCP
-                            loopJob.cancelAndJoin()
-                            onDisconnect(getDisconnectionReason(mqttException))
-                        }
+                } catch (mqttException: MqttException) {
+
+                    if(isRetryableError(mqttException)) {
+                        // Ok lets retry to connect
+                        Log.d(TAG, "@MQTT_EXCEPTION RETRYABLE(${isRetryableError(mqttException)}) >> CODE:${mqttException.reasonCode}  CAUSE:${mqttException.cause}")
+
+                    } else {
+                        // Error has to do with the way the client is configured
+                        // TODO
+                        Log.d(TAG, "@DBG >> Cause : $mqttException")
+                        onDisconnect(getDisconnectionReason(mqttException))
                     }
                 }
-
-            } // End isActive
-        }
+            }
+         }
     }
 
     /**
@@ -263,6 +253,7 @@ class IotCoreClient (
             handleTelemetry()
 
             delay(TASKS_LOOP_DELAY)
+            Log.d(TAG, "@DBG >> LOOP")
 
         }
     }
@@ -473,13 +464,14 @@ class IotCoreClient (
 
         mqttClient.connect(configureConnectionOptions())
 
-        for (topic in subscriptionTopics) {
+        // TODO handle the topics subsscriptions
+        // for (topic in subscriptionTopics) {
 
             // TODO Handle the topics
             // Log.d(TAG, "@DBG >> Topics $topic")
 
-            mqttClient.subscribe(topic)
-        }
+            // mqttClient.subscribe(topic)
+        // }
 
         onConnection()
     }
@@ -505,9 +497,8 @@ class IotCoreClient (
      * Call client's connection callbacks - Connection
      */
     private fun onConnection() {
-        if(clientConnectionState.getAndSet(true)) {
-            connectionCallback.onConnected()
-        }
+        clientConnectionState.set(true)
+        connectionCallback.onConnected()
     }
 
     /**
@@ -535,8 +526,6 @@ class IotCoreClient (
     fun disconnect() {
         // Close MQTT Connection
         mqttClient.close()
-        // Close Coroutine Job
-        loopJob.cancel()
     }
 
     /**
